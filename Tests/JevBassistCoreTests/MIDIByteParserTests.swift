@@ -79,6 +79,21 @@ final class MIDIByteParserTests: XCTestCase {
         XCTAssertEqual(events.first?.note, 67)
     }
 
+    func testChannelStatusAbortsTruncatedSysEx() {
+        var parser = MIDIByteParser()
+
+        let events = parser.parse(
+            [0xF0, 0x01, 0x02, 0x90, 65, 91],
+            hostTime: 31,
+            receivedAt: receivedAt
+        )
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.kind, .noteOn)
+        XCTAssertEqual(events.first?.note, 65)
+        XCTAssertEqual(events.first?.velocity, 91)
+    }
+
     func testConsumesUnsupportedChannelMessagesWithoutLosingAlignment() {
         var parser = MIDIByteParser()
 

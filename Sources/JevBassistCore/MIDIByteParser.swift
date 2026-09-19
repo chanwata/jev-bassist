@@ -22,8 +22,12 @@ public struct MIDIByteParser: Sendable {
             if isInsideSysEx {
                 if byte == 0xF7 {
                     isInsideSysEx = false
+                    continue
                 }
-                continue
+                guard byte & 0x80 != 0 else {
+                    continue
+                }
+                isInsideSysEx = false
             }
 
             if byte == 0xF0 {
