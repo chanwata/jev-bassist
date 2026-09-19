@@ -26,6 +26,10 @@ let package = Package(
         .testTarget(
             name: "JevBassistCoreTests",
             dependencies: ["JevBassistCore"]
+        ),
+        .testTarget(
+            name: "JevBassistMIDITests",
+            dependencies: ["JevBassistMIDI"]
         )
     ]
 )

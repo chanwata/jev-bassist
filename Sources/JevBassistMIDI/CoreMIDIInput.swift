@@ -38,7 +38,9 @@ public enum CoreMIDIInputError: Error, CustomStringConvertible {
     }
 }
 
-public final class CoreMIDIInput: @unchecked Sendable {
+/// Own this object and call `connect` from one control thread. Event delivery is
+/// handed to a private serial queue, but CoreMIDI lifecycle state is not Sendable.
+public final class CoreMIDIInput {
     public typealias EventHandler = @Sendable (MIDIEvent) -> Void
 
     private var client = MIDIClientRef()
@@ -147,26 +149,12 @@ public final class CoreMIDIInput: @unchecked Sendable {
         _ packetList: UnsafePointer<MIDIPacketList>,
         sourceID: MIDIEndpointRef
     ) {
-        var packets: [(hostTime: UInt64, bytes: [UInt8])] = []
-
-        withUnsafePointer(to: packetList.pointee.packet) { firstPacket in
-            var packetPointer = UnsafeMutablePointer(mutating: firstPacket)
-
-            for _ in 0..<packetList.pointee.numPackets {
-                let packet = packetPointer.pointee
-                let bytes = withUnsafeBytes(of: packet.data) {
-                    Array($0.prefix(Int(packet.length)))
-                }
-                packets.append((hostTime: packet.timeStamp, bytes: bytes))
-                packetPointer = MIDIPacketNext(packetPointer)
-            }
-        }
+        let packets = MIDIPacketListReader.copyPackets(from: packetList)
 
         let receivedAt = Date()
-        processingQueue.async { [weak self, packets] in
-            guard let self else {
-                return
-            }
+        let decoder = decoder
+        let handler = handler
+        processingQueue.async { [packets, decoder, handler] in
             for packet in packets {
                 let events = decoder.decode(
                     packet.bytes,

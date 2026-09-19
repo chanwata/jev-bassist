@@ -36,6 +36,7 @@ Build an interactive AI bassist for live MIDI sessions. Optimize for the felt qu
 - Use Swift 6 language mode and treat concurrency warnings as design feedback.
 - Prefer value types and `Sendable` domain models.
 - Isolate mutable callback state and document any `@unchecked Sendable` conformance.
+- Keep CoreMIDI client lifecycle and connection changes on one owning thread unless that state is explicitly synchronized.
 - Do not block CoreMIDI or audio-related callback threads.
 - Normalize MIDI Note On with velocity zero to Note Off at the decoding boundary.
 
