@@ -25,11 +25,11 @@ enum MIDIPacketListReader {
 
         for _ in 0..<packetList.pointee.numPackets {
             let packetStorage = UnsafeRawPointer(packetPointer)
-            let hostTime = packetStorage.load(
+            let hostTime = packetStorage.loadUnaligned(
                 fromByteOffset: timeStampOffset,
                 as: MIDITimeStamp.self
             )
-            let length = packetStorage.load(
+            let length = packetStorage.loadUnaligned(
                 fromByteOffset: lengthOffset,
                 as: UInt16.self
             )
