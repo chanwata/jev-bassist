@@ -44,18 +44,17 @@ final class MIDIPacketListReaderTests: XCTestCase {
         after currentPacket: UnsafeMutablePointer<MIDIPacket>
     ) throws -> UnsafeMutablePointer<MIDIPacket> {
         try bytes.withUnsafeBufferPointer { buffer in
-            guard let baseAddress = buffer.baseAddress,
-                  let packet = MIDIPacketListAdd(
-                    packetList,
-                    capacity,
-                    currentPacket,
-                    time,
-                    buffer.count,
-                    baseAddress
-                  ) else {
+            guard let baseAddress = buffer.baseAddress else {
                 throw PacketListTestError.couldNotAddPacket
             }
-            return packet
+            return MIDIPacketListAdd(
+                packetList,
+                capacity,
+                currentPacket,
+                time,
+                buffer.count,
+                baseAddress
+            )
         }
     }
 }
