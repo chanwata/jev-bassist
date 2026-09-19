@@ -43,7 +43,7 @@ public final class CoreMIDIInput: @unchecked Sendable {
 
     private var client = MIDIClientRef()
     private var inputPort = MIDIPortRef()
-    private var connectedEndpoints: [MIDIEndpointRef] = []
+    private var connectionContexts: [MIDIEndpointRef: MIDIConnectionContext] = [:]
     private let decoder = LockedMIDIDecoder()
     private let processingQueue = DispatchQueue(label: "dev.jev-bassist.midi-processing")
     private let handler: EventHandler
@@ -67,8 +67,14 @@ public final class CoreMIDIInput: @unchecked Sendable {
             client,
             "Jev Bassist Input" as CFString,
             &newPort
-        ) { [weak self] packetList, _ in
-            self?.receive(packetList)
+        ) { [weak self] packetList, sourceConnectionRefCon in
+            guard let self, let sourceConnectionRefCon else {
+                return
+            }
+            let context = Unmanaged<MIDIConnectionContext>
+                .fromOpaque(sourceConnectionRefCon)
+                .takeUnretainedValue()
+            receive(packetList, sourceID: context.endpoint)
         }
 
         guard portStatus == noErr else {
@@ -80,7 +86,7 @@ public final class CoreMIDIInput: @unchecked Sendable {
     }
 
     deinit {
-        for endpoint in connectedEndpoints {
+        for endpoint in connectionContexts.keys {
             MIDIPortDisconnectSource(inputPort, endpoint)
         }
         if inputPort != 0 {
@@ -124,18 +130,23 @@ public final class CoreMIDIInput: @unchecked Sendable {
             selected = sources
         }
 
-        for source in selected where !connectedEndpoints.contains(source.endpoint) {
-            let status = MIDIPortConnectSource(inputPort, source.endpoint, nil)
+        for source in selected where connectionContexts[source.endpoint] == nil {
+            let context = MIDIConnectionContext(endpoint: source.endpoint)
+            let opaqueContext = Unmanaged.passUnretained(context).toOpaque()
+            let status = MIDIPortConnectSource(inputPort, source.endpoint, opaqueContext)
             guard status == noErr else {
                 throw CoreMIDIInputError.connection(source: source.name, status: status)
             }
-            connectedEndpoints.append(source.endpoint)
+            connectionContexts[source.endpoint] = context
         }
 
         return selected
     }
 
-    private func receive(_ packetList: UnsafePointer<MIDIPacketList>) {
+    private func receive(
+        _ packetList: UnsafePointer<MIDIPacketList>,
+        sourceID: MIDIEndpointRef
+    ) {
         var packets: [(hostTime: UInt64, bytes: [UInt8])] = []
 
         withUnsafePointer(to: packetList.pointee.packet) { firstPacket in
@@ -159,6 +170,7 @@ public final class CoreMIDIInput: @unchecked Sendable {
             for packet in packets {
                 let events = decoder.decode(
                     packet.bytes,
+                    streamID: sourceID,
                     hostTime: packet.hostTime,
                     receivedAt: receivedAt
                 )
@@ -181,17 +193,31 @@ public final class CoreMIDIInput: @unchecked Sendable {
     }
 }
 
+private final class MIDIConnectionContext: @unchecked Sendable {
+    let endpoint: MIDIEndpointRef
+
+    init(endpoint: MIDIEndpointRef) {
+        self.endpoint = endpoint
+    }
+}
+
 private final class LockedMIDIDecoder: @unchecked Sendable {
     private let lock = NSLock()
-    private var parser = MIDIByteParser()
+    private var parser = MIDIStreamParser<MIDIEndpointRef>()
 
     func decode(
         _ bytes: [UInt8],
+        streamID: MIDIEndpointRef,
         hostTime: UInt64,
         receivedAt: Date
     ) -> [MIDIEvent] {
         lock.lock()
         defer { lock.unlock() }
-        return parser.parse(bytes, hostTime: hostTime, receivedAt: receivedAt)
+        return parser.parse(
+            bytes,
+            streamID: streamID,
+            hostTime: hostTime,
+            receivedAt: receivedAt
+        )
     }
 }

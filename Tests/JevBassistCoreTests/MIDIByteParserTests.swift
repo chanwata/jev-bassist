@@ -97,4 +97,34 @@ final class MIDIByteParserTests: XCTestCase {
         XCTAssertEqual(MIDINoteName.name(for: 69), "A4")
         XCTAssertEqual(MIDINoteName.name(for: 127), "G9")
     }
+
+    func testRunningStatusIsIsolatedBetweenStreams() {
+        var parser = MIDIStreamParser<String>()
+
+        let partialA = parser.parse(
+            [0x90, 60],
+            streamID: "keyboard-a",
+            hostTime: 50,
+            receivedAt: receivedAt
+        )
+        let completeB = parser.parse(
+            [0x81, 64, 7],
+            streamID: "keyboard-b",
+            hostTime: 51,
+            receivedAt: receivedAt
+        )
+        let completeA = parser.parse(
+            [100],
+            streamID: "keyboard-a",
+            hostTime: 52,
+            receivedAt: receivedAt
+        )
+
+        XCTAssertTrue(partialA.isEmpty)
+        XCTAssertEqual(completeB.map(\.kind), [.noteOff])
+        XCTAssertEqual(completeB.map(\.note), [64])
+        XCTAssertEqual(completeA.map(\.kind), [.noteOn])
+        XCTAssertEqual(completeA.map(\.note), [60])
+        XCTAssertEqual(completeA.map(\.velocity), [100])
+    }
 }
