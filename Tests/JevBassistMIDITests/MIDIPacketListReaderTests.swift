@@ -4,7 +4,7 @@ import XCTest
 
 final class MIDIPacketListReaderTests: XCTestCase {
     func testCopiesMultiplePacketsFromOriginalListStorage() throws {
-        let capacity = 1_024
+        let capacity = MemoryLayout<MIDIPacketList>.size
         let storage = UnsafeMutableRawPointer.allocate(
             byteCount: capacity,
             alignment: MemoryLayout<MIDIPacketList>.alignment
