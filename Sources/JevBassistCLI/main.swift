@@ -99,7 +99,9 @@ do {
         }
         let connected = try monitor.connect(sourceMatching: source)
         print("Listening to \(connected.map(\.name).joined(separator: ", ")). Press Control-C to stop.")
-        RunLoop.current.run()
+        withExtendedLifetime(monitor) {
+            RunLoop.current.run()
+        }
     }
 } catch {
     FileHandle.standardError.write(Data("Error: \(error)\n\n\(usage)\n".utf8))
