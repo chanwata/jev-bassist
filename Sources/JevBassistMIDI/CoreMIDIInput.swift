@@ -139,7 +139,7 @@ public final class CoreMIDIInput: @unchecked Sendable {
         var packets: [(hostTime: UInt64, bytes: [UInt8])] = []
 
         withUnsafePointer(to: packetList.pointee.packet) { firstPacket in
-            var packetPointer = firstPacket
+            var packetPointer = UnsafeMutablePointer(mutating: firstPacket)
 
             for _ in 0..<packetList.pointee.numPackets {
                 let packet = packetPointer.pointee
