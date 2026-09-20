@@ -9,11 +9,16 @@ let package = Package(
     ],
     products: [
         .library(name: "JevBassistCore", targets: ["JevBassistCore"]),
+        .library(name: "JevBassistJev", targets: ["JevBassistJev"]),
         .library(name: "JevBassistMIDI", targets: ["JevBassistMIDI"]),
         .executable(name: "jev-bassist", targets: ["JevBassistCLI"])
     ],
     targets: [
         .target(name: "JevBassistCore"),
+        .target(
+            name: "JevBassistJev",
+            dependencies: ["JevBassistCore"]
+        ),
         .target(
             name: "JevBassistMIDI",
             dependencies: ["JevBassistCore"],
@@ -21,11 +26,17 @@ let package = Package(
         ),
         .executableTarget(
             name: "JevBassistCLI",
-            dependencies: ["JevBassistCore", "JevBassistMIDI"]
+            dependencies: ["JevBassistCore", "JevBassistJev", "JevBassistMIDI"],
+            resources: [.process("Resources")],
+            linkerSettings: [.linkedFramework("Network")]
         ),
         .testTarget(
             name: "JevBassistCoreTests",
             dependencies: ["JevBassistCore"]
+        ),
+        .testTarget(
+            name: "JevBassistJevTests",
+            dependencies: ["JevBassistCore", "JevBassistJev"]
         ),
         .testTarget(
             name: "JevBassistMIDITests",

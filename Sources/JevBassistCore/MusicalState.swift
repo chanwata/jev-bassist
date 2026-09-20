@@ -422,26 +422,21 @@ public struct MusicalStateTracker: Sendable {
         from onsets: [NoteObservation],
         heldNotes: [HeldNote]
     ) -> [ChordCandidate] {
-        var histogram = Array(repeating: 0.0, count: 12)
-        var observedKeys = Set<NoteKey>()
-
-        for onset in onsets {
-            histogram[Int(onset.note % 12)] += max(1, Double(onset.velocity)) / 127
-            observedKeys.insert(NoteKey(channel: onset.channel, note: onset.note))
+        let evidence = harmonicEvidence(from: onsets, heldNotes: heldNotes)
+        guard !evidence.isEmpty else {
+            return []
         }
-        for held in heldNotes {
-            let key = NoteKey(channel: held.channel, note: held.note)
-            guard !observedKeys.contains(key) else {
-                continue
-            }
-            histogram[Int(held.note % 12)] += 0.75 * max(1, Double(held.velocity)) / 127
+        var histogram = Array(repeating: 0.0, count: 12)
+        for observation in evidence {
+            histogram[Int(observation.note % 12)] += max(1, Double(observation.velocity)) / 127
         }
 
         let totalWeight = histogram.reduce(0, +)
         let uniquePitchClasses = histogram.filter { $0 > 0 }.count
-        guard totalWeight > 0, uniquePitchClasses >= 2 else {
+        guard totalWeight > 0, uniquePitchClasses >= 3 else {
             return []
         }
+        let bassPitchClass = Int(evidence.min(by: { $0.note < $1.note })!.note % 12)
 
         var candidates: [ChordCandidate] = []
         for root in 0..<12 {
@@ -454,7 +449,8 @@ public struct MusicalStateTracker: Sendable {
                 let chordWeight = tones.reduce(0.0) { $0 + histogram[$1] }
                 let precision = chordWeight / totalWeight
                 let coverage = Double(presentCount) / Double(tones.count)
-                let confidence = 0.7 * precision + 0.3 * coverage
+                let bassRootBonus = root == bassPitchClass ? 0.1 : 0
+                let confidence = min(1, 0.65 * precision + 0.25 * coverage + bassRootBonus)
                 guard confidence >= 0.55 else {
                     continue
                 }
@@ -478,6 +474,54 @@ public struct MusicalStateTracker: Sendable {
             return $0.quality.rawValue < $1.quality.rawValue
         }.prefix(3).map { $0 }
     }
+
+    /// Sequential melody notes should not be collapsed into a fictional
+    /// chord. Prefer the most recent three-note strike (including a quick
+    /// arpeggiation); otherwise use a currently held triad.
+    private func harmonicEvidence(
+        from onsets: [NoteObservation],
+        heldNotes: [HeldNote]
+    ) -> [HarmonicObservation] {
+        let clusterWindow: UInt64 = 250_000
+        let sortedOnsets = onsets.sorted { $0.offsetMicroseconds < $1.offsetMicroseconds }
+        var current: [NoteObservation] = []
+        var clusterStart: UInt64?
+        var latestChordCluster: [NoteObservation]?
+
+        func isChordCluster(_ cluster: [NoteObservation]) -> Bool {
+            Set(cluster.map { $0.note % 12 }).count >= 3
+        }
+
+        for onset in sortedOnsets {
+            if let start = clusterStart, onset.offsetMicroseconds - start > clusterWindow {
+                if isChordCluster(current) {
+                    latestChordCluster = current
+                }
+                current = [onset]
+                clusterStart = onset.offsetMicroseconds
+            } else {
+                if clusterStart == nil {
+                    clusterStart = onset.offsetMicroseconds
+                }
+                current.append(onset)
+            }
+        }
+        if isChordCluster(current) {
+            latestChordCluster = current
+        }
+        if let latestChordCluster {
+            return latestChordCluster.map {
+                HarmonicObservation(note: $0.note, velocity: $0.velocity)
+            }
+        }
+
+        guard Set(heldNotes.map { $0.note % 12 }).count >= 3 else {
+            return []
+        }
+        return heldNotes.map {
+            HarmonicObservation(note: $0.note, velocity: $0.velocity)
+        }
+    }
 }
 
 private struct NoteKey: Hashable, Sendable {
@@ -488,6 +532,11 @@ private struct NoteKey: Hashable, Sendable {
 private struct NoteObservation: Sendable {
     let offsetMicroseconds: UInt64
     let channel: UInt8
+    let note: UInt8
+    let velocity: UInt8
+}
+
+private struct HarmonicObservation: Sendable {
     let note: UInt8
     let velocity: UInt8
 }

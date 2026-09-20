@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import JevBassistCore
 
@@ -66,15 +67,136 @@ final class LocalBassistTests: XCTestCase {
 
         let noteOns = phrase.messages.filter { $0.kind == .noteOn }
         let noteOffs = phrase.messages.filter { $0.kind == .noteOff }
-        XCTAssertEqual(noteOns.map(\.note), [36, 39, 43, 39])
+        XCTAssertEqual(noteOns.map(\.note), [36, 38, 39, 41])
         XCTAssertEqual(
             noteOns.map(\.offsetMicroseconds),
-            [8_000_000, 8_500_000, 9_000_000, 9_500_000]
+            [8_000_000, 8_750_000, 9_000_000, 9_750_000]
         )
         XCTAssertEqual(noteOffs.count, noteOns.count)
-        XCTAssertTrue(phrase.messages.allSatisfy { (36...47).contains($0.note) })
-        XCTAssertEqual(noteOns[0].bytes, [0x92, 36, 84])
+        XCTAssertTrue(phrase.messages.allSatisfy { (36...48).contains($0.note) })
+        XCTAssertEqual(noteOns.map(\.velocity), [80, 70, 74, 70])
+        XCTAssertEqual(noteOns[0].bytes, [0x92, 36, 80])
         XCTAssertEqual(noteOffs[0].bytes, [0x82, 36, 0])
+    }
+
+    func testPhraseGeneratorUsesRelationshipForRhythmicPocket() throws {
+        let generator = BassPhraseGenerator(outputChannel: 3)
+        let chord = ChordCandidate(rootPitchClass: 0, quality: .minor, confidence: 1)
+        let configuration = try MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4)
+        let follow = generator.generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .follow,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: chord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration
+        )
+        let contrast = generator.generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .contrast,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: chord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration
+        )
+
+        XCTAssertEqual(
+            follow.messages.filter { $0.kind == .noteOn }.map(\.offsetMicroseconds),
+            [0, 750_000, 1_000_000, 1_750_000]
+        )
+        XCTAssertEqual(
+            contrast.messages.filter { $0.kind == .noteOn }.map(\.offsetMicroseconds),
+            [0, 750_000, 1_375_000]
+        )
+    }
+
+    func testPhraseGeneratorVoiceLeadsAcrossBToCWithoutOctaveDrop() throws {
+        let phrase = BassPhraseGenerator(outputChannel: 3).generate(
+            decision: BassDecision(
+                activity: .sparse,
+                relationship: .follow,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(),
+            previousBassNote: 47,
+            humanAverageVelocity: 80
+        )
+
+        XCTAssertEqual(
+            phrase.messages.filter { $0.kind == .noteOn }.first?.note,
+            48
+        )
+    }
+
+    func testPhraseGeneratorUsesFlatFifthForDiminishedChord() throws {
+        let phrase = BassPhraseGenerator(outputChannel: 3).generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .follow,
+                motion: .leap,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .diminished, confidence: 1),
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration()
+        )
+
+        XCTAssertEqual(
+            phrase.messages.filter { $0.kind == .noteOn }.map(\.note),
+            [36, 42, 39, 42]
+        )
+    }
+
+    func testFillApproachesKnownNextChordAndStaysSafeWithoutOne() throws {
+        let generator = BassPhraseGenerator(outputChannel: 3)
+        let decision = BassDecision(
+            activity: .normal,
+            relationship: .follow,
+            motion: .approach,
+            fill: true,
+            confidence: 1
+        )
+        let configuration = try MusicalStateConfiguration()
+        let currentChord = ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1)
+        let withoutTarget = generator.generate(
+            decision: decision,
+            chord: currentChord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration,
+            previousBassNote: nil,
+            humanAverageVelocity: nil
+        )
+        let towardF = generator.generate(
+            decision: decision,
+            chord: currentChord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration,
+            previousBassNote: nil,
+            humanAverageVelocity: nil,
+            nextChord: ChordCandidate(rootPitchClass: 5, quality: .major, confidence: 1)
+        )
+
+        XCTAssertEqual(withoutTarget.messages.filter { $0.kind == .noteOn }.last?.note, 43)
+        XCTAssertEqual(towardF.messages.filter { $0.kind == .noteOn }.last?.note, 40)
     }
 
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {
@@ -113,6 +235,62 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(plans[0].targetBarIndex, 4)
         XCTAssertEqual(plans[0].phrase.startMicroseconds, 8_000_000)
         XCTAssertFalse(plans[0].phrase.messages.isEmpty)
+    }
+
+    func testEnginePrefetchesRemoteDecisionOneBarBeforeFirstBassPlan() throws {
+        let provider = ImmediatePreparedProvider()
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(
+                    tempoBPM: 120,
+                    beatsPerBar: 4
+                ),
+                introBars: 4,
+                outputChannel: 3
+            ),
+            decisionProvider: provider
+        )
+        var plans: [BassBarPlan] = []
+
+        for bar in 0..<4 {
+            let start = UInt64(bar) * 2_000_000
+            plans += try ingestTriad(at: start, into: &engine)
+            plans += try engine.advance(through: start + 2_000_000).plans
+        }
+
+        XCTAssertEqual(provider.preparedTargets, [4, 5])
+        XCTAssertEqual(provider.resolvedTargets, [4])
+        XCTAssertEqual(plans.count, 1)
+        XCTAssertEqual(plans[0].decisionSource, .jev)
+        XCTAssertEqual(plans[0].decision.activity, .busy)
+    }
+
+    func testEngineUsesPlannedHarmonyAndApproachesTheNextChord() throws {
+        let progression = try ChordProgressionParser.parse("Dm7,G7,Cmaj7,Cmaj7")
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(
+                    tempoBPM: 120,
+                    beatsPerBar: 4
+                ),
+                introBars: 4,
+                outputChannel: 3,
+                progression: progression
+            )
+        )
+        var plans: [BassBarPlan] = []
+        for bar in 1...4 {
+            plans += try engine.advance(through: UInt64(bar) * 2_000_000).plans
+        }
+
+        let firstPlan = try XCTUnwrap(plans.first)
+        XCTAssertEqual(firstPlan.targetBarIndex, 4)
+        XCTAssertEqual(firstPlan.chord, progression[0])
+        XCTAssertFalse(firstPlan.usedHeldChord)
+        XCTAssertEqual(
+            firstPlan.phrase.messages.filter { $0.kind == .noteOn }.last?.note,
+            42
+        )
     }
 
     func testEngineHoldsChordForTwoSilentBarsThenFallsBackToRest() throws {
@@ -194,6 +372,59 @@ final class LocalBassistTests: XCTestCase {
             heldNotes: [],
             pulse: nil,
             chordCandidates: []
+        )
+    }
+}
+
+private final class ImmediatePreparedProvider: BassDecisionProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var prepared: Set<Int> = []
+    private var recordedPreparedTargets: [Int] = []
+    private var recordedResolvedTargets: [Int] = []
+
+    var preparedTargets: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedPreparedTargets
+    }
+
+    var resolvedTargets: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedResolvedTargets
+    }
+
+    func prepare(_ input: BassDecisionInput) {
+        lock.lock()
+        prepared.insert(input.targetBarIndex)
+        recordedPreparedTargets.append(input.targetBarIndex)
+        lock.unlock()
+    }
+
+    func decision(for input: BassDecisionInput) -> BassDecision {
+        RuleBasedBassDecisionProvider().decision(for: input)
+    }
+
+    func resolution(for input: BassDecisionInput) -> BassDecisionResolution {
+        lock.lock()
+        recordedResolvedTargets.append(input.targetBarIndex)
+        let wasPrepared = prepared.remove(input.targetBarIndex) != nil
+        lock.unlock()
+        guard wasPrepared else {
+            return BassDecisionResolution(
+                decision: decision(for: input),
+                source: .fallback
+            )
+        }
+        return BassDecisionResolution(
+            decision: BassDecision(
+                activity: .busy,
+                relationship: .contrast,
+                motion: .approach,
+                fill: true,
+                confidence: 0.9
+            ),
+            source: .jev
         )
     }
 }

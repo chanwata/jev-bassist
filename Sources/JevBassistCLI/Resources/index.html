@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jev Bassist — Shared Clock</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f2f0e8;
+      --muted: #85877f;
+      --panel: rgba(20, 21, 20, .82);
+      --line: rgba(242, 240, 232, .12);
+      --acid: #c8ff45;
+      --acid-soft: rgba(200, 255, 69, .14);
+      --orange: #ff785a;
+      --beat-duration: 500ms;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 72% 18%, rgba(200, 255, 69, .055), transparent 26rem),
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+        #0a0b0a;
+      background-size: auto, 32px 32px, 32px 32px, auto;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+      letter-spacing: -.015em;
+    }
+
+    button, select, input { font: inherit; }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: clamp(18px, 3vw, 42px);
+      gap: clamp(24px, 4vw, 56px);
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      font-weight: 760;
+      letter-spacing: -.055em;
+      font-size: 22px;
+    }
+
+    .brand span {
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: .08em;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .connection {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--muted);
+      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #464844;
+      box-shadow: 0 0 0 5px rgba(255,255,255,.035);
+    }
+
+    .connection.online .dot {
+      background: var(--acid);
+      box-shadow: 0 0 0 5px var(--acid-soft), 0 0 18px rgba(200,255,69,.45);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+      gap: clamp(24px, 5vw, 72px);
+      align-items: center;
+      max-width: 1500px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .clock {
+      min-width: 0;
+      display: grid;
+      gap: 30px;
+    }
+
+    .phase {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--acid);
+      font: 650 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    .phase::before {
+      content: "";
+      width: 34px;
+      height: 1px;
+      background: currentColor;
+    }
+
+    .numbers {
+      display: flex;
+      align-items: flex-end;
+      gap: clamp(24px, 6vw, 90px);
+    }
+
+    .measure { min-width: 0; }
+
+    .eyebrow {
+      color: var(--muted);
+      font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .bar-number {
+      font-size: clamp(78px, 13vw, 190px);
+      line-height: .78;
+      letter-spacing: -.085em;
+      font-weight: 720;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pulse-wrap {
+      position: relative;
+      width: clamp(130px, 18vw, 240px);
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+    }
+
+    .pulse-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(var(--acid) calc(var(--pulse, 0) * 1turn), var(--line) 0);
+      mask: radial-gradient(circle, transparent 65%, #000 66%);
+      -webkit-mask: radial-gradient(circle, transparent 65%, #000 66%);
+      transform: rotate(-90deg);
+    }
+
+    .beat-number {
+      font-size: clamp(62px, 9vw, 124px);
+      line-height: 1;
+      font-weight: 650;
+      letter-spacing: -.07em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .beat-strip {
+      display: grid;
+      grid-template-columns: repeat(var(--beats, 4), minmax(34px, 1fr));
+      gap: 10px;
+      max-width: 760px;
+    }
+
+    .beat-cell {
+      height: 8px;
+      border-radius: 99px;
+      background: var(--line);
+      overflow: hidden;
+      transition: background .08s ease, transform .08s ease;
+    }
+
+    .beat-cell.active {
+      background: var(--acid);
+      transform: scaleY(1.55);
+      box-shadow: 0 0 22px rgba(200,255,69,.25);
+    }
+
+    .caption {
+      color: var(--muted);
+      max-width: 620px;
+      font-size: clamp(14px, 1.4vw, 17px);
+      line-height: 1.55;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.28);
+      backdrop-filter: blur(16px);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 22px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      font-size: 13px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .note-readout {
+      color: var(--muted);
+      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .field { margin-top: 15px; }
+
+    label {
+      display: block;
+      margin: 0 0 7px 2px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    select, input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,.035);
+      color: var(--ink);
+      padding: 12px 13px;
+      outline: none;
+    }
+
+    select:focus, input:focus { border-color: rgba(200,255,69,.65); }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 13px 16px;
+      cursor: pointer;
+      font-weight: 720;
+      transition: transform .12s ease, opacity .12s ease, background .12s ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+
+    .primary { background: var(--acid); color: #10120b; }
+    .primary.armed { background: var(--orange); color: #180d0a; }
+    .secondary { background: rgba(255,255,255,.07); color: var(--ink); }
+
+    .hint {
+      min-height: 34px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      color: #60625d;
+      font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 820px) {
+      main { grid-template-columns: 1fr; }
+      .panel { max-width: none; }
+      .numbers { justify-content: space-between; }
+      footer { flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand">JEV/BASSIST <span>shared clock</span></div>
+      <div class="connection" id="connection"><i class="dot"></i><span id="connectionText">Connecting to Swift</span></div>
+    </header>
+
+    <main>
+      <section class="clock" aria-live="polite">
+        <div class="phase" id="phase">Waiting for clock</div>
+        <div class="numbers">
+          <div class="measure">
+            <div class="eyebrow">Bar</div>
+            <div class="bar-number" id="barNumber">—</div>
+          </div>
+          <div class="pulse-wrap" id="pulseWrap">
+            <div class="pulse-ring"></div>
+            <div>
+              <div class="eyebrow">Beat</div>
+              <div class="beat-number" id="beatNumber">—</div>
+            </div>
+          </div>
+        </div>
+        <div class="beat-strip" id="beatStrip"></div>
+        <div class="caption" id="caption">This display follows the clock inside the running Swift session.</div>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-title">
+          <h2>Session</h2>
+          <span class="note-readout" id="noteReadout">CHORD — · NOTE —</span>
+        </div>
+        <div class="field">
+          <label for="midiInput">Swift MIDI route</label>
+          <input id="midiInput" value="Waiting for session" disabled>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="bpm">BPM</label>
+            <input id="bpm" value="—" disabled>
+          </div>
+          <div class="field">
+            <label for="beats">Beats</label>
+            <input id="beats" value="—" disabled>
+          </div>
+          <div class="field">
+            <label for="intro">Intro bars</label>
+            <input id="intro" value="—" disabled>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="armButton" disabled>Start</button>
+          <button class="secondary" id="resetButton" type="button" disabled>Stop</button>
+        </div>
+        <div class="hint" id="hint">Start this page with <code>jev-bassist jam ... --ui</code>. MIDI and the API key stay in the Swift process.</div>
+      </aside>
+    </main>
+
+    <footer>
+      <span>Clock source · Swift / CoreMIDI</span>
+      <span id="footerTiming">Waiting for session</span>
+    </footer>
+  </div>
+
+  <script>
+    const ui = Object.fromEntries([
+      'connection','connectionText','phase','barNumber','beatNumber','pulseWrap','beatStrip',
+      'caption','midiInput','bpm','beats','intro','armButton','resetButton','hint',
+      'noteReadout','footerTiming'
+    ].map(id => [id, document.getElementById(id)]));
+
+    let state = null;
+    let animationFrame = 0;
+    let renderedBeat = -1;
+
+    function rebuildBeats(count) {
+      document.documentElement.style.setProperty('--beats', count);
+      ui.beatStrip.replaceChildren(...Array.from({length: count}, (_, index) => {
+        const cell = document.createElement('div');
+        cell.className = 'beat-cell';
+        cell.dataset.beat = index + 1;
+        return cell;
+      }));
+    }
+
+    function applyState(next) {
+      state = next;
+      ui.connection.classList.add('online');
+      ui.connectionText.textContent = 'Swift connected';
+      ui.midiInput.value = `${next.source} → ${next.destination}`;
+      ui.bpm.value = next.tempoBPM;
+      ui.beats.value = next.beatsPerBar;
+      ui.intro.value = next.introBars;
+      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · bass after ${next.introBars} bars`;
+      const harmony = next.nextChord
+        ? `${next.chord ?? '—'} → ${next.nextChord}`
+        : (next.chord ?? '—');
+      ui.noteReadout.textContent = `CHORD ${harmony} · NOTE ${next.lastNote ?? '—'}`;
+      ui.armButton.disabled = next.running || next.phase === 'stopped';
+      ui.resetButton.disabled = next.phase === 'stopped';
+      ui.armButton.textContent = next.running ? 'Running' : 'Start';
+      rebuildBeats(next.beatsPerBar);
+      renderedBeat = -1;
+
+      if (!next.running) {
+        cancelAnimationFrame(animationFrame);
+        ui.barNumber.textContent = '—';
+        ui.beatNumber.textContent = '—';
+        ui.pulseWrap.style.setProperty('--pulse', 0);
+        ui.phase.textContent = next.phase === 'stopped' ? 'Session stopped' : 'Ready';
+        ui.caption.textContent = next.phase === 'stopped'
+          ? 'The Swift session has stopped safely.'
+          : 'Press Start on the downbeat. Swift will start MIDI scheduling and this display together.';
+        return;
+      }
+      cancelAnimationFrame(animationFrame);
+      render();
+    }
+
+    function render() {
+      if (!state?.running || state.startedAtUnixMilliseconds == null) return;
+      const beatMs = 60000 / state.tempoBPM;
+      const elapsed = Math.max(0, Date.now() - state.startedAtUnixMilliseconds);
+      const absoluteBeat = Math.floor(elapsed / beatMs);
+      const beatProgress = (elapsed % beatMs) / beatMs;
+      const beat = absoluteBeat % state.beatsPerBar + 1;
+      const bar = Math.floor(absoluteBeat / state.beatsPerBar) + 1;
+      const introRemaining = Math.max(0, state.introBars - bar + 1);
+
+      ui.pulseWrap.style.setProperty('--pulse', beatProgress);
+      if (absoluteBeat !== renderedBeat) {
+        renderedBeat = absoluteBeat;
+        ui.barNumber.textContent = bar;
+        ui.beatNumber.textContent = beat;
+        [...ui.beatStrip.children].forEach((cell, index) => {
+          cell.classList.toggle('active', index + 1 === beat);
+        });
+        if (introRemaining > 0) {
+          ui.phase.textContent = `Intro · bass in ${introRemaining} ${introRemaining === 1 ? 'bar' : 'bars'}`;
+          const listener = state.brain === 'jev' ? 'Jev' : 'The local rule engine';
+          ui.caption.textContent = `Swift position: bar ${bar}, beat ${beat}. Play while ${listener} listens and prepares.`;
+        } else {
+          const source = state.decisionSource ? ` · ${state.decisionSource}` : '';
+          ui.phase.textContent = `Live · ${state.brain}${source}`;
+          ui.caption.textContent = `Authoritative Swift position: bar ${bar}, beat ${beat}.`;
+        }
+      }
+      animationFrame = requestAnimationFrame(render);
+    }
+
+    async function command(name) {
+      try {
+        const response = await fetch(`/api/${name}`, {method: 'POST'});
+        if (!response.ok) throw new Error(`${response.status}`);
+      } catch (error) {
+        ui.hint.textContent = `Command failed: ${error.message}`;
+      }
+    }
+
+    ui.armButton.addEventListener('click', () => command('start'));
+    ui.resetButton.addEventListener('click', () => command('stop'));
+
+    const events = new EventSource('/events');
+    events.onmessage = event => applyState(JSON.parse(event.data));
+    events.onerror = () => {
+      ui.connection.classList.remove('online');
+      ui.connectionText.textContent = 'Swift disconnected';
+      ui.armButton.disabled = true;
+      ui.resetButton.disabled = true;
+    };
+  </script>
+</body>
+</html>

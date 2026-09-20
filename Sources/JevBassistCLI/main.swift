@@ -2,11 +2,17 @@ import Darwin
 import Dispatch
 import Foundation
 import JevBassistCore
+import JevBassistJev
 import JevBassistMIDI
 
 private struct SoundcheckOptions {
     let destination: String
     let channel: UInt8
+}
+
+private enum BrainMode: String, Sendable {
+    case rules
+    case jev
 }
 
 private struct JamOptions: Sendable {
@@ -17,6 +23,9 @@ private struct JamOptions: Sendable {
     let inputChannel: UInt8
     let outputChannel: UInt8
     let introBars: Int
+    let brain: BrainMode
+    let webUI: Bool
+    let progression: [ChordCandidate]
 }
 
 private enum Command {
@@ -126,11 +135,17 @@ private enum Command {
     }
 
     private static func jamOptions(in arguments: [String]) throws -> JamOptions {
+        let webUICount = arguments.filter { $0 == "--ui" }.count
+        guard webUICount <= 1 else {
+            throw CLIError.invalidArguments("Use '--ui' only once.")
+        }
+        let valueArguments = arguments.filter { $0 != "--ui" }
         let options = try optionValues(
-            in: arguments,
+            in: valueArguments,
             allowed: [
                 "--source", "--destination", "--bpm", "--beats-per-bar",
-                "--input-channel", "--output-channel", "--intro-bars"
+                "--input-channel", "--output-channel", "--intro-bars", "--brain",
+                "--progression"
             ],
             usage: "jam --source NAME --destination NAME [options]"
         )
@@ -145,6 +160,16 @@ private enum Command {
         let beatsPerBar = try intOption(options, name: "--beats-per-bar", default: 4)
         let introBars = try intOption(options, name: "--intro-bars", default: 4)
         let outputChannel = try channelOption(options, name: "--output-channel", default: 3)
+        let brainName = options["--brain"] ?? BrainMode.rules.rawValue
+        guard let brain = BrainMode(rawValue: brainName) else {
+            throw CLIError.invalidArguments("--brain must be 'rules' or 'jev'.")
+        }
+        let progression: [ChordCandidate]
+        if let progressionText = options["--progression"] {
+            progression = try ChordProgressionParser.parse(progressionText)
+        } else {
+            progression = []
+        }
         let musicalState = try MusicalStateConfiguration(
             tempoBPM: tempoBPM,
             beatsPerBar: beatsPerBar
@@ -152,7 +177,8 @@ private enum Command {
         _ = try LocalBassistConfiguration(
             musicalState: musicalState,
             introBars: introBars,
-            outputChannel: outputChannel
+            outputChannel: outputChannel,
+            progression: progression
         )
         return JamOptions(
             source: source,
@@ -161,7 +187,10 @@ private enum Command {
             beatsPerBar: beatsPerBar,
             inputChannel: try channelOption(options, name: "--input-channel", default: 1),
             outputChannel: outputChannel,
-            introBars: introBars
+            introBars: introBars,
+            brain: brain,
+            webUI: webUICount == 1,
+            progression: progression
         )
     }
 
@@ -257,7 +286,7 @@ USAGE
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N] [--brain rules|jev] [--progression CHORDS] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -267,7 +296,7 @@ COMMANDS
   capture      Record a versioned JSON fixture. Press Return to stop and save.
   replay       Replay into the analyzer and print state. No MIDI output is sent.
   soundcheck   Send three short bass notes to one destination, then silence it.
-  jam          Listen locally and schedule rule-based bass after the intro. Press Return to stop.
+  jam          Listen locally and schedule bass after the intro. Add --ui for the shared clock.
 """
 
 private func printSources(_ sources: [MIDISource]) {
@@ -335,7 +364,23 @@ private func format(_ plan: BassBarPlan) -> String {
         .filter { $0.kind == .noteOn }
         .map { MIDINoteName.name(for: $0.note) }
         .joined(separator: ",")
-    return "bass bar=\(plan.targetBarIndex + 1) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
+    return "bass bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
+}
+
+private let jevTraceLock = NSLock()
+
+private func log(_ trace: JevDecisionTrace) {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.sortedKeys]
+    guard let data = try? encoder.encode(trace) else {
+        return
+    }
+    jevTraceLock.lock()
+    defer { jevTraceLock.unlock() }
+    FileHandle.standardError.write(Data("jev-trace ".utf8))
+    FileHandle.standardError.write(data)
+    FileHandle.standardError.write(Data("\n".utf8))
 }
 
 private func fileURL(for path: String) -> URL {
@@ -436,7 +481,7 @@ private func runSoundcheck(_ options: SoundcheckOptions) throws {
 
 /// Mutable session state is confined to `queue`; the unchecked conformance is
 /// used only so CoreMIDI's Sendable callback can enqueue copied events.
-private final class JamSession: @unchecked Sendable {
+private final class JamSession: @unchecked Sendable, JamWebControlling {
     private static let inputGraceMicroseconds: UInt64 = 8_000
     private static let outputSafetyOffsetMicroseconds: UInt64 = 12_000
 
@@ -444,36 +489,79 @@ private final class JamSession: @unchecked Sendable {
     private let options: JamOptions
     private let output: CoreMIDIOutput
     private let stopSignal: @Sendable () -> Void
+    private let stateHandler: @Sendable (JamWebState) -> Void
     private var engine: LocalBassistEngine
     private var anchorHostTime: UInt64?
+    private var startedAt: Date?
     private var timer: DispatchSourceTimer?
     private var stopped = false
     private var failureDescription: String?
+    private var lastPublishedBeat: Int?
+    private var lastChord: String?
+    private var lastDecisionSource: String?
+    private var lastNote: String?
 
     init(
         options: JamOptions,
         output: CoreMIDIOutput,
+        stateHandler: @escaping @Sendable (JamWebState) -> Void = { _ in },
         stopSignal: @escaping @Sendable () -> Void
     ) throws {
         self.options = options
         self.output = output
+        self.stateHandler = stateHandler
         self.stopSignal = stopSignal
         let musicalState = try MusicalStateConfiguration(
             tempoBPM: options.tempoBPM,
             beatsPerBar: options.beatsPerBar
         )
+        let decisionProvider: any BassDecisionProvider
+        switch options.brain {
+        case .rules:
+            decisionProvider = RuleBasedBassDecisionProvider()
+        case .jev:
+            guard let apiKey = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"],
+                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw CLIError.invalidArguments(
+                    "--brain jev requires TYPESAFE_API_KEY in the environment."
+                )
+            }
+            let barMilliseconds = 60_000 * Double(options.beatsPerBar) / options.tempoBPM
+            let deadlineMilliseconds = UInt64(
+                min(750, max(100, barMilliseconds - 50)).rounded(.down)
+            )
+            decisionProvider = JevDecisionProvider(
+                apiKey: apiKey,
+                deadlineMilliseconds: deadlineMilliseconds,
+                traceHandler: log
+            )
+        }
         engine = LocalBassistEngine(
             configuration: try LocalBassistConfiguration(
                 musicalState: musicalState,
                 introBars: options.introBars,
-                outputChannel: options.outputChannel
-            )
+                outputChannel: options.outputChannel,
+                progression: options.progression
+            ),
+            decisionProvider: decisionProvider
         )
     }
 
     func receive(_ event: MIDIEvent) {
         queue.async { [weak self] in
             self?.handle(event)
+        }
+    }
+
+    func startClockFromWeb() {
+        queue.async { [weak self] in
+            self?.beginClock(hostTime: MIDIHostTime.now, trigger: "Web UI")
+        }
+    }
+
+    func publishInitialState() {
+        queue.async { [weak self] in
+            self?.publishState(elapsedMicroseconds: nil)
         }
     }
 
@@ -485,11 +573,13 @@ private final class JamSession: @unchecked Sendable {
             stopped = true
             timer?.cancel()
             timer = nil
+            engine.cancelPendingDecisions()
             do {
                 try output.stop(channel: options.outputChannel)
             } catch {
                 failureDescription = failureDescription ?? String(describing: error)
             }
+            publishState(elapsedMicroseconds: nil)
             return failureDescription
         }
     }
@@ -500,13 +590,22 @@ private final class JamSession: @unchecked Sendable {
         }
         let eventHostTime = event.hostTime == 0 ? MIDIHostTime.now : event.hostTime
 
+        if event.kind == .noteOn {
+            lastNote = MIDINoteName.name(for: event.note)
+        }
+
         if anchorHostTime == nil {
             guard event.kind == .noteOn else {
                 return
             }
-            anchorHostTime = eventHostTime
-            startTimer()
-            print("Clock started on \(MIDINoteName.name(for: event.note)); bass enters after \(options.introBars) complete bars.")
+            guard !options.webUI else {
+                publishState(elapsedMicroseconds: nil)
+                return
+            }
+            beginClock(
+                hostTime: eventHostTime,
+                trigger: MIDINoteName.name(for: event.note)
+            )
         }
 
         guard let anchorHostTime else {
@@ -523,6 +622,9 @@ private final class JamSession: @unchecked Sendable {
         )
         do {
             try process(engine.ingest(sessionEvent), anchorHostTime: anchorHostTime)
+            if event.kind == .noteOn {
+                publishState(elapsedMicroseconds: offset)
+            }
         } catch let error as MusicalStateError {
             switch error {
             case .nonMonotonicEvent, .eventBeforeCompletedBoundary:
@@ -533,6 +635,18 @@ private final class JamSession: @unchecked Sendable {
         } catch {
             fail(error)
         }
+    }
+
+    private func beginClock(hostTime: UInt64, trigger: String) {
+        guard !stopped, anchorHostTime == nil else {
+            return
+        }
+        anchorHostTime = hostTime
+        startedAt = Date()
+        lastPublishedBeat = nil
+        startTimer()
+        publishState(elapsedMicroseconds: 0)
+        print("Clock started by \(trigger); bass enters after \(options.introBars) complete bars.")
     }
 
     private func startTimer() {
@@ -562,6 +676,13 @@ private final class JamSession: @unchecked Sendable {
                 engine.advance(through: safeElapsed),
                 anchorHostTime: anchorHostTime
             )
+            let absoluteBeat = Int(
+                Double(safeElapsed) * options.tempoBPM / 60_000_000
+            )
+            if lastPublishedBeat != absoluteBeat {
+                lastPublishedBeat = absoluteBeat
+                publishState(elapsedMicroseconds: safeElapsed)
+            }
         } catch {
             fail(error)
         }
@@ -573,6 +694,7 @@ private final class JamSession: @unchecked Sendable {
     ) throws {
         for snapshot in update.snapshots where snapshot.boundary == .bar {
             print(format(snapshot))
+            lastChord = snapshot.state.chordCandidates.first?.displayName
         }
         let outputAnchor = MIDIHostTime.addingMicroseconds(
             Self.outputSafetyOffsetMicroseconds,
@@ -580,11 +702,55 @@ private final class JamSession: @unchecked Sendable {
         )
         for plan in update.plans {
             print(format(plan))
+            lastChord = plan.chord?.displayName
+            lastDecisionSource = plan.decisionSource.rawValue
             try output.schedule(
                 plan.phrase.messages,
                 anchorHostTime: outputAnchor
             )
         }
+    }
+
+    private func publishState(elapsedMicroseconds: UInt64?) {
+        let absoluteBeat = elapsedMicroseconds.map {
+            Int(Double($0) * options.tempoBPM / 60_000_000)
+        }
+        let barIndex = absoluteBeat.map { $0 / options.beatsPerBar }
+        let phase: String
+        if stopped {
+            phase = "stopped"
+        } else if let barIndex {
+            phase = barIndex < options.introBars ? "intro" : "live"
+        } else {
+            phase = "ready"
+        }
+        stateHandler(
+            JamWebState(
+                running: !stopped && anchorHostTime != nil,
+                tempoBPM: options.tempoBPM,
+                beatsPerBar: options.beatsPerBar,
+                introBars: options.introBars,
+                brain: options.brain.rawValue,
+                source: options.source,
+                destination: options.destination,
+                startedAtUnixMilliseconds: startedAt.map { $0.timeIntervalSince1970 * 1_000 },
+                bar: barIndex.map { $0 + 1 },
+                beat: absoluteBeat.map { $0 % options.beatsPerBar + 1 },
+                phase: phase,
+                chord: barIndex.flatMap { progressionChord(for: $0)?.displayName } ?? lastChord,
+                nextChord: barIndex.flatMap { progressionChord(for: $0 + 1)?.displayName },
+                decisionSource: lastDecisionSource,
+                lastNote: lastNote
+            )
+        )
+    }
+
+    private func progressionChord(for barIndex: Int) -> ChordCandidate? {
+        guard !options.progression.isEmpty, barIndex >= options.introBars else {
+            return nil
+        }
+        let index = (barIndex - options.introBars) % options.progression.count
+        return options.progression[index]
     }
 
     private func fail(_ error: Error) {
@@ -595,7 +761,9 @@ private final class JamSession: @unchecked Sendable {
         failureDescription = String(describing: error)
         timer?.cancel()
         timer = nil
+        engine.cancelPendingDecisions()
         try? output.stop(channel: options.outputChannel)
+        publishState(elapsedMicroseconds: nil)
         stopSignal()
     }
 }
@@ -604,11 +772,21 @@ private func runJam(_ options: JamOptions) throws {
     let output = try CoreMIDIOutput()
     let destination = try output.connect(destinationMatching: options.destination)
     let stopSemaphore = DispatchSemaphore(value: 0)
+    let webServer: JamWebServer?
+    if options.webUI {
+        webServer = try JamWebServer(stopSignal: { stopSemaphore.signal() })
+    } else {
+        webServer = nil
+    }
     let session = try JamSession(
         options: options,
         output: output,
+        stateHandler: { state in webServer?.publish(state) },
         stopSignal: { stopSemaphore.signal() }
     )
+    webServer?.attach(controller: session)
+    webServer?.start()
+    session.publishInitialState()
     let monitor = try CoreMIDIInput { event in
         session.receive(event)
     }
@@ -616,7 +794,24 @@ private func runJam(_ options: JamOptions) throws {
 
     print("Listening to \(connectedSources.map(\.name).joined(separator: ", ")) on channel \(options.inputChannel).")
     print("Bass output: \(destination.name), channel \(options.outputChannel), \(options.tempoBPM) BPM, \(options.beatsPerBar)/4.")
-    print("Play one note to start the bar clock. Press Return to stop safely.")
+    print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
+    if !options.progression.isEmpty {
+        print("Harmony: \(options.progression.map(\.displayName).joined(separator: " → ")) (loops after the intro).")
+    } else {
+        print("Harmony: live detection (experimental, one-bar response).")
+    }
+    if options.webUI {
+        print("Shared clock: http://127.0.0.1:8765")
+        print("Click Start in the browser. Press Return in this terminal to stop safely.")
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .milliseconds(250)) {
+            let opener = Process()
+            opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            opener.arguments = ["http://127.0.0.1:8765"]
+            try? opener.run()
+        }
+    } else {
+        print("Play one note to start the bar clock. Press Return to stop safely.")
+    }
     DispatchQueue.global(qos: .userInitiated).async {
         _ = readLine()
         stopSemaphore.signal()
@@ -624,8 +819,10 @@ private func runJam(_ options: JamOptions) throws {
     stopSemaphore.wait()
     monitor.flushPendingEvents()
     if let failure = session.stop() {
+        webServer?.stop()
         throw CLIError.liveSession(failure)
     }
+    webServer?.stop()
     print("Stopped; pending MIDI was flushed and output channel \(options.outputChannel) was silenced.")
 }
 

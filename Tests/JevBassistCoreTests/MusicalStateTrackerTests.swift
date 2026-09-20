@@ -72,6 +72,24 @@ final class MusicalStateTrackerTests: XCTestCase {
         XCTAssertEqual(bar.state.pulse?.confidence ?? 0, 0.75, accuracy: 0.000_001)
     }
 
+    func testSequentialMelodyIsNotMisclassifiedAsAChord() throws {
+        var tracker = try makeTracker()
+        _ = try tracker.ingest(event(at: 0, note: 60))
+        _ = try tracker.ingest(event(at: 200_000, kind: .noteOff, note: 60))
+        _ = try tracker.ingest(event(at: 400_000, note: 61))
+        _ = try tracker.ingest(event(at: 600_000, kind: .noteOff, note: 61))
+        _ = try tracker.ingest(event(at: 800_000, note: 63))
+        _ = try tracker.ingest(event(at: 1_000_000, kind: .noteOff, note: 63))
+        _ = try tracker.ingest(event(at: 1_200_000, note: 64))
+        _ = try tracker.ingest(event(at: 1_400_000, kind: .noteOff, note: 64))
+
+        let snapshots = try tracker.finish(through: 2_000_000)
+        let bar = try XCTUnwrap(snapshots.last)
+
+        XCTAssertEqual(bar.boundary, .bar)
+        XCTAssertTrue(bar.state.chordCandidates.isEmpty)
+    }
+
     func testEmptySessionProducesStableSilentBeatAndBarSnapshots() throws {
         var tracker = try makeTracker()
 

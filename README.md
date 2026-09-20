@@ -5,13 +5,13 @@ Jev Bassist is an experimental macOS session partner that listens to a human MID
 The project deliberately separates two jobs:
 
 - a local, deterministic engine schedules and generates MIDI notes;
-- Jev will later choose musical behavior such as `follow`, `contrast`, `rest`, or `fill`.
+- Jev can choose bounded musical behavior such as `follow`, `contrast`, `rest`, or `fill`.
 
 Network latency must never sit in the note-timing path.
 
-## Current milestone: local bassist
+## Current milestone: Jev decision provider
 
-The CLI now completes its first audible loop entirely on the Mac. It can:
+The CLI completes its audible loop with either local rules or a pipelined Jev decision provider. It can:
 
 - list CoreMIDI input sources;
 - list CoreMIDI output destinations;
@@ -22,10 +22,13 @@ The CLI now completes its first audible loop entirely on the Mac. It can:
 - replay a fixture without MIDI hardware;
 - derive beat and bar snapshots containing note density, velocity, register, held notes, a pulse estimate, and ranked chord candidates;
 - make a bounded rule-based bass decision once per completed bar;
-- generate conservative, deterministic bass notes and schedule them with CoreMIDI host timestamps;
+- ask Jev for `activity`, `relationship`, `motion`, and `fill` in one typed request;
+- prefetch Jev decisions one bar ahead and fall back to the deterministic rule policy without delaying a note;
+- log the complete secret-free Jev request, response, resolved model, outcome, and latency;
+- generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
 - flush pending output and silence the selected channel when a live session stops.
 
-The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state, decision, and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. No network call or GUI is involved.
+The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion reads the authoritative Swift clock and can start or stop the same live session without entering the MIDI output path.
 
 ## Requirements
 
@@ -82,10 +85,26 @@ swift run jev-bassist jam \
   --destination "Steinberg UR22mkII" \
   --bpm 120 \
   --input-channel 1 \
-  --output-channel 3
+  --output-channel 3 \
+  --brain rules
 ```
 
 Play the first note exactly where bar 1 should begin; that Note On starts the configured bar clock. After four complete human-only bars, the first bass phrase is scheduled for bar 5. Press `Return` to stop safely. `--beats-per-bar` defaults to `4`, and `--intro-bars` defaults to `4`.
+
+For reliable harmony, provide a looping chord progression. Its first chord begins with the first bass bar after the intro:
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 120 \
+  --input-channel 1 \
+  --output-channel 3 \
+  --progression "Dm7,G7,Cmaj7,Cmaj7" \
+  --brain rules
+```
+
+Common major, minor, dominant-seventh, major-seventh, minor-seventh, and diminished symbols are accepted, including sharps and flats. The current engine reduces seventh chords to their major/minor triad family, then uses the following chord as the target for restrained fills and chromatic approaches. Without `--progression`, live chord detection remains available as an experimental one-bar response mode.
 
 The M3 rule policy is intentionally conservative:
 
@@ -94,9 +113,62 @@ The M3 rule policy is intentionally conservative:
 - lighter playing produces root-oriented normal or sparse phrases;
 - a silent bar can use the last chord and move modestly for at most two bars;
 - longer harmonic uncertainty returns to rest instead of repeating a stale chord;
-- generated notes stay in MIDI 36–47 (C2–B2), with a paired Note Off for every Note On.
+- sequential melody notes are not collapsed into a fictional chord; harmony needs a three-note strike, quick arpeggiation, or held triad;
+- `follow`, `contrast`, and `hold` now select different rhythmic pockets instead of producing the same metronomic pattern;
+- chord tones are voice-led across bar boundaries, including B2 to C3 without an octave drop;
+- bass velocity follows the human bar at a restrained level, with a stronger downbeat and softer offbeats;
+- generated notes stay in MIDI 36–48 (C2–C3), with a paired Note Off for every Note On.
 
 All phrase notes are scheduled locally. The live loop waits 8 ms for near-boundary input and applies a fixed 12 ms output safety offset; network latency is not present in the timing path.
+
+## Open the shared beat display
+
+Add `--ui` to `jam`:
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 120 \
+  --input-channel 1 \
+  --output-channel 3 \
+  --intro-bars 4 \
+  --progression "Dm7,G7,Cmaj7,Cmaj7" \
+  --brain jev \
+  --ui
+```
+
+The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Click **Start** on the downbeat. That single action starts the Swift/CoreMIDI bar clock and the browser display together; the browser does not open MIDI itself and does not run a second independent clock. **Stop** ends the live process safely. You can also press `Return` in Terminal.
+
+Swift sends state changes with server-sent events. Between updates the page renders progress from Swift's original wall-clock start time, so animation jitter does not accumulate into musical clock drift. The TypeSafe API key remains in the Swift process and is never sent to the page.
+
+## Switch the bassist brain to Jev
+
+Create an API key in the [TypeSafe dashboard](https://console.typesafe.ai/) and place it in the environment. Do not put the key in a command-line option, fixture, or log:
+
+```bash
+export TYPESAFE_API_KEY='your-key-here'
+```
+
+Then run the same session with `--brain jev`:
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 120 \
+  --input-channel 1 \
+  --output-channel 3 \
+  --brain jev
+```
+
+The integration uses TypeSafe's documented `POST /v1/systemone` contract and `jev-latest` model alias. Four independent questions are evaluated together: three `choice` questions for activity, relationship, and motion, plus one `noul` question for fill. The request contains compact musical state, not raw MIDI bytes.
+
+Jev work starts one full bar before the result can be used. At the next bar boundary the engine only reads an already completed result; it never waits. A missing, late, cancelled, malformed, HTTP-error, or low-confidence result uses the rule policy for that bar. With the default four-bar intro, the bar-5 decision is prefetched after bar 3, leaving bar 4 as the network budget.
+
+Each completed request writes one `jev-trace` JSON object to standard error. It contains the full request and response, latency, deadline, resolved model, candidate decision, and outcome, but no API key or authorization header. Normal bass lines include `brain=jev`, `brain=rules`, or `brain=fallback`, so the audible decision source remains visible.
+
+The TypeSafe request and response shapes are documented in the [official API reference](https://docs.typesafe.ai/api).
 
 ## Monitor MIDI input only
 
@@ -166,12 +238,13 @@ swift build
 swift test
 ```
 
-Pure MIDI decoding, fixture validation, replay, musical-state analysis, bounded decisions, and phrase generation live in `JevBassistCore` and are covered by deterministic unit tests. Apple-specific input, output, host-time conversion, and scheduling live behind `JevBassistMIDI`. GitHub Actions runs both commands on macOS for every pull request.
+Pure MIDI decoding, fixture validation, replay, musical-state analysis, bounded decisions, and phrase generation live in `JevBassistCore`. The typed HTTP client and pipelined provider live in `JevBassistJev`. Apple-specific input, output, host-time conversion, and scheduling live behind `JevBassistMIDI`. Codec, confidence fallback, deadline, cancellation, and prefetch behavior are covered by tests. GitHub Actions runs both commands on macOS for every pull request.
 
 ## Planned path
 
-1. Add a Jev-backed `BassDecisionProvider` with deadlines and the local rule policy as fallback.
-2. Compare `rules` and `jev` modes using identical replays and live sessions.
-3. Report decision latency and stability statistics for evaluation.
+1. Verify the revised pocket generator and `--brain jev` on the JD-Xi using the same captured performance.
+2. Add explicit key or chord-progression input for melody-only sessions; guessing harmony from a monophonic line remains intentionally unsupported.
+3. Compare `rules` and `jev` modes using identical replays and live sessions.
+4. Report p50, p95, and p99 decision latency and stability statistics for evaluation.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.
