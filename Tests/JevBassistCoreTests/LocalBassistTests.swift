@@ -143,6 +143,62 @@ final class LocalBassistTests: XCTestCase {
         )
     }
 
+    func testPhraseGeneratorUsesFlatFifthForDiminishedChord() throws {
+        let phrase = BassPhraseGenerator(outputChannel: 3).generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .follow,
+                motion: .leap,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .diminished, confidence: 1),
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration()
+        )
+
+        XCTAssertEqual(
+            phrase.messages.filter { $0.kind == .noteOn }.map(\.note),
+            [36, 42, 39, 42]
+        )
+    }
+
+    func testFillApproachesKnownNextChordAndStaysSafeWithoutOne() throws {
+        let generator = BassPhraseGenerator(outputChannel: 3)
+        let decision = BassDecision(
+            activity: .normal,
+            relationship: .follow,
+            motion: .approach,
+            fill: true,
+            confidence: 1
+        )
+        let configuration = try MusicalStateConfiguration()
+        let currentChord = ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1)
+        let withoutTarget = generator.generate(
+            decision: decision,
+            chord: currentChord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration,
+            previousBassNote: nil,
+            humanAverageVelocity: nil
+        )
+        let towardF = generator.generate(
+            decision: decision,
+            chord: currentChord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration,
+            previousBassNote: nil,
+            humanAverageVelocity: nil,
+            nextChord: ChordCandidate(rootPitchClass: 5, quality: .major, confidence: 1)
+        )
+
+        XCTAssertEqual(withoutTarget.messages.filter { $0.kind == .noteOn }.last?.note, 43)
+        XCTAssertEqual(towardF.messages.filter { $0.kind == .noteOn }.last?.note, 40)
+    }
+
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {
         let phrase = BassPhraseGenerator(outputChannel: 3).generate(
             decision: BassDecision(

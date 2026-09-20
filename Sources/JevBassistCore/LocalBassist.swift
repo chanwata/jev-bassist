@@ -253,7 +253,8 @@ public struct BassPhraseGenerator: Sendable {
         startMicroseconds: UInt64,
         musicalStateConfiguration: MusicalStateConfiguration,
         previousBassNote: UInt8?,
-        humanAverageVelocity: Double?
+        humanAverageVelocity: Double?,
+        nextChord: ChordCandidate? = nil
     ) -> BassPhrase {
         let barLength = musicalStateConfiguration.boundaryMicroseconds(
             afterBeats: musicalStateConfiguration.beatsPerBar
@@ -278,7 +279,8 @@ public struct BassPhraseGenerator: Sendable {
             decision: decision,
             chord: chord,
             count: positions.count,
-            previousBassNote: previousBassNote
+            previousBassNote: previousBassNote,
+            nextChord: nextChord
         )
         var messages: [ScheduledMIDIMessage] = []
 
@@ -409,9 +411,11 @@ public struct BassPhraseGenerator: Sendable {
         decision: BassDecision,
         chord: ChordCandidate,
         count: Int,
-        previousBassNote: UInt8?
+        previousBassNote: UInt8?,
+        nextChord: ChordCandidate?
     ) -> [UInt8] {
         let thirdInterval = chord.quality == .major ? 4 : 3
+        let fifthInterval = chord.quality == .diminished ? 6 : 7
         let sixthInterval = chord.quality == .minor ? 8 : 9
         let intervals: [Int]
 
@@ -420,13 +424,13 @@ public struct BassPhraseGenerator: Sendable {
         } else {
             switch decision.motion {
             case .root:
-                intervals = [0, 0, 7, 0]
+                intervals = [0, 0, fifthInterval, 0]
             case .step:
-                intervals = [0, 2, thirdInterval, 5, 7, sixthInterval]
+                intervals = [0, 2, thirdInterval, 5, fifthInterval, sixthInterval]
             case .approach:
-                intervals = [0, 7, 0, -1]
+                intervals = [0, fifthInterval, 0, fifthInterval]
             case .leap:
-                intervals = [0, 7, thirdInterval, 7]
+                intervals = [0, fifthInterval, thirdInterval, fifthInterval]
             }
         }
 
@@ -436,8 +440,10 @@ public struct BassPhraseGenerator: Sendable {
         var pitchClasses = (0..<count).map {
             Int(chord.rootPitchClass) + intervals[$0 % intervals.count]
         }
-        if decision.fill {
-            pitchClasses[pitchClasses.count - 1] = Int(chord.rootPitchClass) - 1
+        if (decision.fill || decision.motion == .approach), let nextChord {
+            // A chromatic approach only sounds intentional when its resolution
+            // target is known. The following bar begins on nextChord's root.
+            pitchClasses[pitchClasses.count - 1] = Int(nextChord.rootPitchClass) - 1
         }
 
         var reference = previousBassNote

@@ -397,7 +397,13 @@
     const settings = () => ({
       bpm: clamp(Number(ui.bpm.value) || 120, 20, 400),
       beats: clamp(Math.round(Number(ui.beats.value) || 4), 1, 16),
-      intro: clamp(Math.round(Number(ui.intro.value) || 4), 0, 32)
+      intro: clamp(
+        Number.isFinite(Number(ui.intro.value))
+          ? Math.round(Number(ui.intro.value))
+          : 4,
+        0,
+        32
+      )
     });
 
     function persist() {
