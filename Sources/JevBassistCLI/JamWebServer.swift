@@ -32,6 +32,10 @@ struct JamWebState: Codable, Sendable {
     let companionChannel: UInt8
     let humanVolume: UInt8
     let companionVolume: UInt8
+    let expressionMemory: Double
+    let expressionTension: Double
+    let expressionActivity: Double
+    let expressionResonance: Double
     let visualEvents: [JamVisualEvent]
 }
 

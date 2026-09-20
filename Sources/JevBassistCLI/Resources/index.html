@@ -358,7 +358,7 @@
 
     .actions {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr auto auto;
       gap: 10px;
       margin-top: 12px;
     }
@@ -437,7 +437,7 @@
           </div>
         </div>
         <div class="beat-strip" id="beatStrip"></div>
-        <div class="caption" id="caption">Both performers are rendered from the authoritative Swift MIDI timeline.</div>
+        <div class="caption" id="caption">Recent gestures remain in one shared field and slowly dissolve.</div>
       </section>
 
       <aside class="panel">
@@ -484,9 +484,10 @@
 
         <div class="actions">
           <button class="primary" id="armButton" disabled>Start</button>
+          <button class="secondary" id="audioButton" type="button">Audio</button>
           <button class="secondary" id="resetButton" type="button" disabled>Stop</button>
         </div>
-        <div class="hint" id="hint">MIDI control and visualization stay local. No audio or API key is sent to this page.</div>
+        <div class="hint" id="hint">Audio input is optional and stays inside this browser.</div>
       </aside>
     </main>
 
@@ -499,7 +500,7 @@
   <script>
     const ui = Object.fromEntries([
       'visualizer','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
-      'beatStrip','caption','midiInput','bpm','beats','intro','armButton','resetButton','hint',
+      'beatStrip','caption','midiInput','bpm','beats','intro','armButton','audioButton','resetButton','hint',
       'noteReadout','footerTiming','humanChannel','companionChannel','humanVolume',
       'companionVolume','humanVolumeValue','companionVolumeValue'
     ].map(id => [id, document.getElementById(id)]));
@@ -507,14 +508,33 @@
     const context = ui.visualizer.getContext('2d');
     const pendingEvents = [];
     const activeNotes = new Map();
-    const pulses = [];
     const volumeTimers = {};
+    const membrane = {positions: [], velocities: [], bands: 11, nodes: 96};
     let state = null;
     let renderedBeat = -1;
     let renderedBeatsPerBar = 0;
     let highestVisualEventID = 0;
     let viewportWidth = 0;
     let viewportHeight = 0;
+    let previousFrame = performance.now();
+    let audioContext = null;
+    let audioAnalyser = null;
+    let audioStream = null;
+    let audioWaveform = null;
+    let audioSpectrum = null;
+    let audioEnergy = 0;
+    let audioBrightness = 0;
+
+    function resetMembrane() {
+      membrane.positions = Array.from(
+        {length: membrane.bands},
+        () => new Float32Array(membrane.nodes)
+      );
+      membrane.velocities = Array.from(
+        {length: membrane.bands},
+        () => new Float32Array(membrane.nodes)
+      );
+    }
 
     function resizeCanvas() {
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -523,6 +543,7 @@
       ui.visualizer.width = Math.round(viewportWidth * ratio);
       ui.visualizer.height = Math.round(viewportHeight * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      resetMembrane();
     }
 
     function rebuildBeats(count) {
@@ -596,8 +617,7 @@
       } else {
         activeNotes.delete(key);
       }
-      pulses.push({...event, bornAt: now});
-      if (pulses.length > 96) pulses.splice(0, pulses.length - 96);
+      disturbMembrane(event);
     }
 
     function consumeVisualEvents(now) {
@@ -609,115 +629,155 @@
       }
     }
 
-    function pitchY(note) {
-      const normalized = Math.max(0, Math.min(1, (note - 36) / 48));
-      return viewportHeight * (.80 - normalized * .60);
-    }
-
     function performerGain(performer) {
       if (!state) return .5;
       const value = performer === 'human' ? state.humanVolume : state.companionVolume;
       return Math.max(.08, value / 127);
     }
 
-    function drawGrid(beatProgress, absoluteBeat) {
-      context.clearRect(0, 0, viewportWidth, viewportHeight);
-      context.lineWidth = 1;
-      context.strokeStyle = 'rgba(242,240,232,.045)';
-      const spacing = Math.max(48, Math.round(viewportWidth / 20));
-      context.beginPath();
-      for (let x = spacing; x < viewportWidth; x += spacing) {
-        context.moveTo(x + .5, 0);
-        context.lineTo(x + .5, viewportHeight);
+    function expression(name, fallback) {
+      const value = state?.[name];
+      return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
+    }
+
+    function sampleAudio() {
+      if (!audioAnalyser) {
+        audioEnergy *= .94;
+        audioBrightness *= .96;
+        return;
       }
-      for (let y = spacing; y < viewportHeight; y += spacing) {
-        context.moveTo(0, y + .5);
-        context.lineTo(viewportWidth, y + .5);
+      audioAnalyser.getByteTimeDomainData(audioWaveform);
+      let squareSum = 0;
+      for (const sample of audioWaveform) {
+        const centered = (sample - 128) / 128;
+        squareSum += centered * centered;
       }
-      context.stroke();
+      const rms = Math.sqrt(squareSum / audioWaveform.length);
+      audioAnalyser.getByteFrequencyData(audioSpectrum);
+      let magnitude = 0;
+      let weighted = 0;
+      for (let index = 0; index < audioSpectrum.length; index++) {
+        const value = audioSpectrum[index];
+        magnitude += value;
+        weighted += value * index;
+      }
+      const centroid = magnitude > 0 ? weighted / magnitude / audioSpectrum.length : 0;
+      audioEnergy += (Math.min(1, rms * 5.5) - audioEnergy) * .18;
+      audioBrightness += (Math.min(1, centroid * 2.6) - audioBrightness) * .08;
+    }
+
+    function disturbMembrane(event) {
+      const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
+      const band = Math.round((1 - pitch) * (membrane.bands - 1));
+      const x = event.performer === 'human' ? .27 : .73;
+      const node = Math.round(x * (membrane.nodes - 1));
+      const gain = performerGain(event.performer);
+      const onset = event.kind === 'noteOn' && event.velocity > 0;
+      const energy = Math.max(.08, event.velocity / 127) * gain * (onset ? 1 : -.22);
+      const direction = event.performer === 'human' ? 1 : -1;
+
+      for (let bandOffset = -2; bandOffset <= 2; bandOffset++) {
+        const targetBand = band + bandOffset;
+        if (targetBand < 0 || targetBand >= membrane.bands) continue;
+        for (let nodeOffset = -7; nodeOffset <= 7; nodeOffset++) {
+          const targetNode = node + nodeOffset;
+          if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
+          const falloff = Math.exp(-Math.abs(nodeOffset) * .25 - Math.abs(bandOffset) * .7);
+          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * .24;
+        }
+      }
+    }
+
+    function evolveMembrane(now, deltaSeconds) {
+      const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
+      const memory = expression('expressionMemory', 0);
+      const resonance = Math.max(expression('expressionResonance', .2), audioEnergy * .9);
+      const stiffness = .11 + tension * .09;
+      const damping = Math.min(.986, .92 + resonance * .055);
+      const step = Math.min(2, deltaSeconds * 60);
+
+      for (const note of activeNotes.values()) {
+        const pitch = Math.max(0, Math.min(1, (note.note - 36) / 48));
+        const band = Math.round((1 - pitch) * (membrane.bands - 1));
+        const node = Math.round((note.performer === 'human' ? .27 : .73) * (membrane.nodes - 1));
+        const direction = note.performer === 'human' ? 1 : -1;
+        const energy = note.velocity / 127 * performerGain(note.performer);
+        membrane.velocities[band][node] += Math.sin(now * .002 + note.note) * energy * .003 * direction;
+      }
+      if (audioEnergy > .015) {
+        const centerBand = Math.round((1 - audioBrightness) * (membrane.bands - 1));
+        const centerNode = Math.round(membrane.nodes * .5);
+        membrane.velocities[centerBand][centerNode] += Math.sin(now * .004) * audioEnergy * .012;
+      }
+
+      const nextVelocities = membrane.velocities.map(row => new Float32Array(row));
+      for (let band = 0; band < membrane.bands; band++) {
+        for (let node = 1; node < membrane.nodes - 1; node++) {
+          const position = membrane.positions[band][node];
+          const horizontal = membrane.positions[band][node - 1]
+            + membrane.positions[band][node + 1] - position * 2;
+          let vertical = 0;
+          if (band > 0) vertical += membrane.positions[band - 1][node] - position;
+          if (band < membrane.bands - 1) vertical += membrane.positions[band + 1][node] - position;
+          const restoring = -position * (.007 + (1 - memory) * .006);
+          nextVelocities[band][node] = (
+            membrane.velocities[band][node]
+            + horizontal * stiffness * step
+            + vertical * memory * .018 * step
+            + restoring * step
+          ) * Math.pow(damping, step);
+        }
+      }
+      membrane.velocities = nextVelocities;
+      for (let band = 0; band < membrane.bands; band++) {
+        for (let node = 1; node < membrane.nodes - 1; node++) {
+          membrane.positions[band][node] += membrane.velocities[band][node] * step;
+        }
+      }
+    }
+
+    function drawMembrane(now, beatProgress, absoluteBeat) {
+      const memory = expression('expressionMemory', 0);
+      const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
+      const activity = Math.max(expression('expressionActivity', 0), audioEnergy);
+      const resonance = Math.max(expression('expressionResonance', .2), audioEnergy * .9);
+      const fade = .17 - resonance * .09;
+      context.fillStyle = `rgba(8,9,8,${Math.max(.055, fade)})`;
+      context.fillRect(0, 0, viewportWidth, viewportHeight);
+
+      const gradient = context.createLinearGradient(0, 0, viewportWidth, 0);
+      gradient.addColorStop(0, `rgba(242,240,232,${.12 + activity * .15})`);
+      gradient.addColorStop(.48, `rgba(242,240,232,${.26 + memory * .24})`);
+      gradient.addColorStop(1, `rgba(200,255,69,${.16 + memory * .34})`);
+      context.strokeStyle = gradient;
+      context.lineWidth = .7 + activity * 1.15;
+
+      for (let band = 0; band < membrane.bands; band++) {
+        const normalizedBand = band / (membrane.bands - 1);
+        const baseline = viewportHeight * (.18 + normalizedBand * .64);
+        const visibility = 1 - Math.abs(normalizedBand - .5) * .55;
+        context.globalAlpha = visibility * (.45 + memory * .55);
+        context.beginPath();
+        for (let node = 0; node < membrane.nodes; node++) {
+          const x = node / (membrane.nodes - 1) * viewportWidth;
+          const field = membrane.positions[band][node];
+          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 3;
+          const y = baseline + field * viewportHeight * (.055 + tension * .035) + drift;
+          if (node === 0) context.moveTo(x, y);
+          else context.lineTo(x, y);
+        }
+        context.stroke();
+      }
+      context.globalAlpha = 1;
 
       const scanX = beatProgress * viewportWidth;
       const downbeat = state && absoluteBeat % state.beatsPerBar === 0;
-      context.strokeStyle = downbeat ? 'rgba(200,255,69,.32)' : 'rgba(242,240,232,.14)';
+      context.strokeStyle = downbeat ? 'rgba(200,255,69,.20)' : 'rgba(242,240,232,.07)';
+      context.lineWidth = 1;
       context.beginPath();
-      context.moveTo(scanX, 0);
-      context.lineTo(scanX, viewportHeight);
+      context.moveTo(scanX, viewportHeight * .12);
+      context.lineTo(scanX, viewportHeight * .88);
       context.stroke();
-    }
-
-    function drawActiveNotes(now) {
-      const human = [];
-      const companion = [];
-      for (const note of activeNotes.values()) {
-        const list = note.performer === 'human' ? human : companion;
-        list.push(note);
-        const y = pitchY(note.note);
-        const gain = performerGain(note.performer);
-        const energy = (note.velocity / 127) * gain;
-        const age = Math.min(1, (now - note.startedAt) / 1800);
-        const fromLeft = note.performer === 'human';
-        const edge = fromLeft ? 0 : viewportWidth;
-        const inner = fromLeft ? viewportWidth * (.34 + age * .08) : viewportWidth * (.66 - age * .08);
-        const color = fromLeft ? `rgba(242,240,232,${.2 + energy * .72})` : `rgba(200,255,69,${.2 + energy * .72})`;
-
-        context.strokeStyle = color;
-        context.lineWidth = 1 + energy * 2.2;
-        context.beginPath();
-        context.moveTo(edge, y);
-        context.lineTo(inner, y);
-        context.stroke();
-
-        const size = 4 + energy * 15;
-        context.strokeRect(inner - size / 2, y - size / 2, size, size);
-      }
-
-      for (const left of human) {
-        if (!companion.length) break;
-        const right = companion.reduce((best, note) =>
-          Math.abs(note.note - left.note) < Math.abs(best.note - left.note) ? note : best
-        );
-        const alpha = .08 + Math.min(1, performerGain('human') * performerGain('companion')) * .18;
-        context.strokeStyle = `rgba(200,255,69,${alpha})`;
-        context.lineWidth = 1;
-        context.beginPath();
-        context.moveTo(viewportWidth * .42, pitchY(left.note));
-        context.lineTo(viewportWidth * .58, pitchY(right.note));
-        context.stroke();
-      }
-    }
-
-    function drawPulses(now) {
-      for (let index = pulses.length - 1; index >= 0; index--) {
-        const pulse = pulses[index];
-        const lifetime = pulse.kind === 'noteOn' ? 1500 : 700;
-        const progress = (now - pulse.bornAt) / lifetime;
-        if (progress >= 1) {
-          pulses.splice(index, 1);
-          continue;
-        }
-        const fromLeft = pulse.performer === 'human';
-        const x = viewportWidth * (fromLeft ? .42 : .58);
-        const y = pitchY(pulse.note);
-        const gain = performerGain(pulse.performer);
-        const energy = Math.max(.12, pulse.velocity / 127) * gain;
-        const radius = 5 + progress * (34 + energy * 42);
-        const alpha = (1 - progress) * (.18 + energy * .5);
-        context.strokeStyle = fromLeft
-          ? `rgba(242,240,232,${alpha})`
-          : `rgba(200,255,69,${alpha})`;
-        context.lineWidth = pulse.kind === 'noteOn' ? 1.2 : .6;
-        context.beginPath();
-        context.arc(x, y, radius, 0, Math.PI * 2);
-        context.stroke();
-
-        if (pulse.kind === 'noteOn') {
-          const angle = (pulse.id * 2.399963) % (Math.PI * 2);
-          context.beginPath();
-          context.moveTo(x, y);
-          context.lineTo(x + Math.cos(angle) * radius * 1.6, y + Math.sin(angle) * radius * 1.6);
-          context.stroke();
-        }
-      }
     }
 
     function updateClock(now) {
@@ -745,7 +805,9 @@
         } else {
           const source = state.decisionSource ? ` · ${state.decisionSource}` : '';
           ui.phase.textContent = `Live · ${state.brain}${source}`;
-          ui.caption.textContent = `Your notes enter from the left; ${state.style} responses enter from the right.`;
+          ui.caption.textContent = state.style === 'memory'
+            ? 'Your gesture bends the left field; its transformed memory returns from the right.'
+            : `Your notes and ${state.style} responses deform the same field.`;
         }
       }
       return {beatProgress, absoluteBeat};
@@ -753,11 +815,14 @@
 
     function render() {
       const now = Date.now();
+      const frameNow = performance.now();
+      const deltaSeconds = Math.max(0, (frameNow - previousFrame) / 1000);
+      previousFrame = frameNow;
+      sampleAudio();
       consumeVisualEvents(now);
       const clock = updateClock(now);
-      drawGrid(clock.beatProgress, clock.absoluteBeat);
-      drawActiveNotes(now);
-      drawPulses(now);
+      evolveMembrane(now, deltaSeconds);
+      drawMembrane(now, clock.beatProgress, clock.absoluteBeat);
       requestAnimationFrame(render);
     }
 
@@ -770,6 +835,40 @@
       }
     }
 
+    async function toggleAudio() {
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+        audioAnalyser = null;
+        audioWaveform = null;
+        audioSpectrum = null;
+        if (audioContext) await audioContext.close();
+        audioContext = null;
+        ui.audioButton.textContent = 'Audio';
+        ui.hint.textContent = 'Audio input is optional and stays inside this browser.';
+        return;
+      }
+      try {
+        audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false},
+          video: false
+        });
+        audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(audioStream);
+        audioAnalyser = audioContext.createAnalyser();
+        audioAnalyser.fftSize = 1024;
+        audioAnalyser.smoothingTimeConstant = .82;
+        audioWaveform = new Uint8Array(audioAnalyser.fftSize);
+        audioSpectrum = new Uint8Array(audioAnalyser.frequencyBinCount);
+        source.connect(audioAnalyser);
+        ui.audioButton.textContent = 'Audio on';
+        ui.hint.textContent = 'Audio energy and brightness now shape the field locally.';
+      } catch (error) {
+        audioStream = null;
+        ui.hint.textContent = `Audio input unavailable: ${error.message}`;
+      }
+    }
+
     function queueVolume(performer, value) {
       const slider = performer === 'human' ? ui.humanVolume : ui.companionVolume;
       const output = performer === 'human' ? ui.humanVolumeValue : ui.companionVolumeValue;
@@ -779,10 +878,14 @@
     }
 
     ui.armButton.addEventListener('click', () => command('start'));
+    ui.audioButton.addEventListener('click', toggleAudio);
     ui.resetButton.addEventListener('click', () => command('stop'));
     ui.humanVolume.addEventListener('input', event => queueVolume('human', event.target.value));
     ui.companionVolume.addEventListener('input', event => queueVolume('companion', event.target.value));
     window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('beforeunload', () => {
+      audioStream?.getTracks().forEach(track => track.stop());
+    });
     resizeCanvas();
     rebuildBeats(4);
     requestAnimationFrame(render);
