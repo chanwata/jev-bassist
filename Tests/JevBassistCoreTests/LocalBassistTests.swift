@@ -67,15 +67,80 @@ final class LocalBassistTests: XCTestCase {
 
         let noteOns = phrase.messages.filter { $0.kind == .noteOn }
         let noteOffs = phrase.messages.filter { $0.kind == .noteOff }
-        XCTAssertEqual(noteOns.map(\.note), [36, 39, 43, 39])
+        XCTAssertEqual(noteOns.map(\.note), [36, 38, 39, 41])
         XCTAssertEqual(
             noteOns.map(\.offsetMicroseconds),
-            [8_000_000, 8_500_000, 9_000_000, 9_500_000]
+            [8_000_000, 8_750_000, 9_000_000, 9_750_000]
         )
         XCTAssertEqual(noteOffs.count, noteOns.count)
-        XCTAssertTrue(phrase.messages.allSatisfy { (36...47).contains($0.note) })
-        XCTAssertEqual(noteOns[0].bytes, [0x92, 36, 84])
+        XCTAssertTrue(phrase.messages.allSatisfy { (36...48).contains($0.note) })
+        XCTAssertEqual(noteOns.map(\.velocity), [80, 70, 74, 70])
+        XCTAssertEqual(noteOns[0].bytes, [0x92, 36, 80])
         XCTAssertEqual(noteOffs[0].bytes, [0x82, 36, 0])
+    }
+
+    func testPhraseGeneratorUsesRelationshipForRhythmicPocket() throws {
+        let generator = BassPhraseGenerator(outputChannel: 3)
+        let chord = ChordCandidate(rootPitchClass: 0, quality: .minor, confidence: 1)
+        let configuration = try MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4)
+        let follow = generator.generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .follow,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: chord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration
+        )
+        let contrast = generator.generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .contrast,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: chord,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration
+        )
+
+        XCTAssertEqual(
+            follow.messages.filter { $0.kind == .noteOn }.map(\.offsetMicroseconds),
+            [0, 750_000, 1_000_000, 1_750_000]
+        )
+        XCTAssertEqual(
+            contrast.messages.filter { $0.kind == .noteOn }.map(\.offsetMicroseconds),
+            [0, 750_000, 1_375_000]
+        )
+    }
+
+    func testPhraseGeneratorVoiceLeadsAcrossBToCWithoutOctaveDrop() throws {
+        let phrase = BassPhraseGenerator(outputChannel: 3).generate(
+            decision: BassDecision(
+                activity: .sparse,
+                relationship: .follow,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(),
+            previousBassNote: 47,
+            humanAverageVelocity: 80
+        )
+
+        XCTAssertEqual(
+            phrase.messages.filter { $0.kind == .noteOn }.first?.note,
+            48
+        )
     }
 
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {

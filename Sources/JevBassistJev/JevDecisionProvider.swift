@@ -141,17 +141,17 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             instructions: "Choose the bass activity for the target bar. Leave room when the human is dense, and avoid activity when harmony is uncertain.",
             criteria: [
                 "rest": "No bass attacks because usable harmony is absent or the safest musical response is silence.",
-                "sparse": "Two widely spaced attacks that leave substantial room for the human player.",
-                "normal": "One supportive attack per beat for a clear chord and available musical space.",
-                "busy": "Eighth-note activity only when the human clearly leaves space and extra momentum is appropriate."
+                "sparse": "One or two widely spaced attacks that leave substantial room for the human player.",
+                "normal": "A supportive pocket of three or four attacks with restrained syncopation.",
+                "busy": "A busier syncopated pocket only when the human clearly leaves space and extra momentum is appropriate."
             ]
         ),
         relationship: JevChoiceQuestion(
             instructions: "Choose how the bass should relate to the human performance in the target bar.",
             criteria: [
-                "follow": "Reinforce the player's current energy and harmonic direction.",
-                "contrast": "Create space or a complementary response instead of matching dense human activity.",
-                "hold": "Maintain the established harmonic attitude while the human pauses or the evidence is limited."
+                "follow": "Use a connected groove that reinforces the player's current energy and harmonic direction.",
+                "contrast": "Use shorter, displaced attacks that create space instead of mirroring dense human activity.",
+                "hold": "Use a restrained root pedal while the human pauses or the evidence is limited."
             ]
         ),
         motion: JevChoiceQuestion(

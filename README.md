@@ -25,10 +25,10 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - ask Jev for `activity`, `relationship`, `motion`, and `fill` in one typed request;
 - prefetch Jev decisions one bar ahead and fall back to the deterministic rule policy without delaying a note;
 - log the complete secret-free Jev request, response, resolved model, outcome, and latency;
-- generate conservative, deterministic bass notes and schedule them with CoreMIDI host timestamps;
+- generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
 - flush pending output and silence the selected channel when a live session stops.
 
-The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. No GUI is involved.
+The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion can show the bar, beat, and intro countdown without entering the MIDI output path.
 
 ## Requirements
 
@@ -98,9 +98,40 @@ The M3 rule policy is intentionally conservative:
 - lighter playing produces root-oriented normal or sparse phrases;
 - a silent bar can use the last chord and move modestly for at most two bars;
 - longer harmonic uncertainty returns to rest instead of repeating a stale chord;
-- generated notes stay in MIDI 36–47 (C2–B2), with a paired Note Off for every Note On.
+- sequential melody notes are not collapsed into a fictional chord; harmony needs a three-note strike, quick arpeggiation, or held triad;
+- `follow`, `contrast`, and `hold` now select different rhythmic pockets instead of producing the same metronomic pattern;
+- chord tones are voice-led across bar boundaries, including B2 to C3 without an octave drop;
+- bass velocity follows the human bar at a restrained level, with a stronger downbeat and softer offbeats;
+- generated notes stay in MIDI 36–48 (C2–C3), with a paired Note Off for every Note On.
 
 All phrase notes are scheduled locally. The live loop waits 8 ms for near-boundary input and applies a fixed 12 ms output safety offset; network latency is not present in the timing path.
+
+## Open the shared beat display
+
+The browser companion listens to the same CoreMIDI source through Chrome's Web MIDI support. Its first Note On starts bar 1 beat 1, matching the Swift session clock. It never sends MIDI and never receives the TypeSafe API key.
+
+In one Terminal window, start the local page:
+
+```bash
+./run-gui.command
+```
+
+Chrome opens `http://127.0.0.1:8765`. Click **Connect MIDI**, choose `Steinberg UR22mkII`, and set the same BPM, beats per bar, and intro bars used by `jam`. Click **Arm on first note**.
+
+In a second Terminal window, start `jam` as usual. The next Note On starts both clocks:
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 120 \
+  --input-channel 1 \
+  --output-channel 3 \
+  --intro-bars 4 \
+  --brain jev
+```
+
+The page uses `requestAnimationFrame` against the original MIDI timestamp instead of incrementing a browser timer, so visual rendering jitter does not accumulate into clock drift. Stop the Swift session and the GUI server separately with `Return` and `Control-C`.
 
 ## Switch the bassist brain to Jev
 
@@ -202,8 +233,9 @@ Pure MIDI decoding, fixture validation, replay, musical-state analysis, bounded 
 
 ## Planned path
 
-1. Verify `--brain jev` on the JD-Xi and tune the bounded question rubrics from traces.
-2. Compare `rules` and `jev` modes using identical replays and live sessions.
-3. Report p50, p95, and p99 decision latency and stability statistics for evaluation.
+1. Verify the revised pocket generator and `--brain jev` on the JD-Xi using the same captured performance.
+2. Add explicit key or chord-progression input for melody-only sessions; guessing harmony from a monophonic line remains intentionally unsupported.
+3. Compare `rules` and `jev` modes using identical replays and live sessions.
+4. Report p50, p95, and p99 decision latency and stability statistics for evaluation.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.

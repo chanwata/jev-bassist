@@ -18,6 +18,7 @@ The intended first complete loop is:
 4. A local phrase generator turns that behavior into concrete notes.
 5. A local scheduler sends the notes to a MIDI output without waiting for the network.
 6. Requests, decisions, confidence values, generated notes, and latency are logged for replay and comparison.
+7. An optional browser companion visualizes the same first-note-anchored bar clock without controlling MIDI timing.
 
 ## Musical behavior contract
 
@@ -58,6 +59,7 @@ Supporting paths record raw input, derived state, decisions, generated output, a
 - Musical decisions occur at beat, bar, or phrase boundaries rather than once per note.
 - Rule and Jev modes can consume the same recorded performance.
 - A failure or timeout produces a local fallback decision and never hangs playback.
+- Browser rendering remains observational; it never enters the note scheduling path or receives an API key.
 
 ## MVP success criteria
 
@@ -106,6 +108,7 @@ The primary human evaluation is a short rating of “this felt like another play
 
 ### M5: Evaluation harness
 
+- provide a browser-based shared bar/beat display anchored by the same first MIDI Note On;
 - replay identical fixtures through both providers;
 - report timing and decision stability;
 - conduct live A/B sessions focused on perceived responsiveness.
