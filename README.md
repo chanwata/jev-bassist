@@ -77,7 +77,7 @@ Choose a new output path and start recording:
 swift run jev-bassist capture session.json --source "Steinberg UR22mkII"
 ```
 
-Play the keyboard, then press `Return`. The command drains events already handed off by CoreMIDI and atomically writes the fixture. It refuses to overwrite an existing file.
+Play the keyboard, then press `Return`. The command drains events already handed off by CoreMIDI and writes the fixture. It refuses to overwrite an existing file.
 
 Each fixture stores:
 
