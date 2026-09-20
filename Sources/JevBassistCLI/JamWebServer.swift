@@ -8,6 +8,7 @@ struct JamWebState: Codable, Sendable {
     let beatsPerBar: Int
     let introBars: Int
     let brain: String
+    let style: String
     let source: String
     let destination: String
     let startedAtUnixMilliseconds: Double?

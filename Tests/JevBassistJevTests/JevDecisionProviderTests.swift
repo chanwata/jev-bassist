@@ -17,10 +17,14 @@ final class JevDecisionProviderTests: XCTestCase {
 
         XCTAssertEqual(object["model"] as? String, "jev-latest")
         XCTAssertEqual(state["target_bar_index"] as? Int, 4)
+        XCTAssertEqual(state["accompaniment_style"] as? String, "ambient")
         XCTAssertEqual(state["note_density_per_beat"] as? Double, 1)
         XCTAssertEqual((state["next_chord"] as? [String: Any])?["root"] as? String, "G")
         XCTAssertEqual(activity["type"] as? String, "choice")
         XCTAssertNotNil(activity["criteria"] as? [String: String])
+        XCTAssertTrue(
+            (activity["instructions"] as? String)?.contains("sustained ambient") == true
+        )
         XCTAssertEqual(fill["type"] as? String, "noul")
         XCTAssertEqual(
             Set(questions.keys),
@@ -160,6 +164,7 @@ final class JevDecisionProviderTests: XCTestCase {
                 quality: .major,
                 confidence: 1
             ),
+            style: .ambient,
             isHeldChord: false,
             targetBarIndex: targetBarIndex
         )
