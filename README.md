@@ -94,6 +94,8 @@ Replay requires no connected MIDI device:
 swift run jev-bassist replay session.json --bpm 120 --beats-per-bar 4
 ```
 
+Here, replay means feeding the recorded events back through the deterministic analyzer. It does not wait in real time or send MIDI to a synthesizer, so it produces no sound. Audible MIDI output and scheduling belong to the next milestone.
+
 `--bpm` defaults to `120` and `--beats-per-bar` defaults to `4`. They define the deterministic analysis grid; the separately reported pulse value is estimated from recent onset intervals. Events exactly on a boundary belong to the following beat, while held notes are sampled at the end of each completed window.
 
 Snapshot output resembles:
