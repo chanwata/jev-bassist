@@ -27,6 +27,8 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - log the complete secret-free Jev request, response, resolved model, outcome, and latency;
 - generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
 - render the same bounded decisions as one quiet, sustained ambient voicing per bar;
+- mix the human and companion parts independently with MIDI Channel Volume controls;
+- render both MIDI performances as a shared, beat-synchronized browser visual;
 - flush pending output and silence the selected channel when a live session stops.
 
 The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion reads the authoritative Swift clock and can start or stop the same live session without entering the MIDI output path.
@@ -135,6 +137,8 @@ swift run jev-bassist jam \
   --bpm 90 \
   --input-channel 1 \
   --output-channel 2 \
+  --human-volume 100 \
+  --companion-volume 72 \
   --intro-bars 2 \
   --progression "Dm7,G7,Cmaj7,Cmaj7" \
   --style ambient \
@@ -143,6 +147,8 @@ swift run jev-bassist jam \
 ```
 
 Ambient notes stay between MIDI 48 and 72 (C3–C5), use restrained velocity, and sustain for most of the bar. A supplied progression is strongly recommended: it gives both the local voicing engine and Jev stable current/next harmony. Start around 70–100 BPM and use a patch with a slow attack, long release, modest reverb, and no tempo-synced arpeggiator.
+
+`--human-volume` and `--companion-volume` accept MIDI values from 0 to 127 and default to 100 and 72. They send Channel Volume (CC7) to the input and output part channels, so the parts must use different MIDI channels for independent control. If both channel options are the same, the two GUI controls are linked because one MIDI part cannot have two CC7 values.
 
 ## Open the shared beat display
 
@@ -162,6 +168,8 @@ swift run jev-bassist jam \
 ```
 
 The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Click **Start** on the downbeat. That single action starts the Swift/CoreMIDI bar clock and the browser display together; the browser does not open MIDI itself and does not run a second independent clock. **Stop** ends the live process safely. You can also press `Return` in Terminal.
+
+The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. The visual field is driven by the combined MIDI timeline: human notes enter from the left, companion notes enter from the right, pitch controls vertical position, velocity and channel volume control visual weight, held notes remain on screen, and the central links show simultaneous interaction. It deliberately uses MIDI rather than capturing analog audio, so the two performers remain distinguishable and no microphone permission or audio stream is required.
 
 Swift sends state changes with server-sent events. Between updates the page renders progress from Swift's original wall-clock start time, so animation jitter does not accumulate into musical clock drift. The TypeSafe API key remains in the Swift process and is never sent to the page.
 

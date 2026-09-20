@@ -19,6 +19,7 @@ The intended first complete loop is:
 5. A local scheduler sends the notes to a MIDI output without waiting for the network.
 6. Requests, decisions, confidence values, generated notes, and latency are logged for replay and comparison.
 7. An optional loopback browser companion starts/stops the session and visualizes the authoritative Swift bar clock without scheduling MIDI itself.
+8. The same browser can mix separate synth-part channels and render human and companion MIDI events as one synchronized visual field.
 
 ## Musical behavior contract
 
@@ -62,6 +63,7 @@ Supporting paths record raw input, derived state, decisions, generated output, a
 - Rule and Jev modes can consume the same recorded performance.
 - A failure or timeout produces a local fallback decision and never hangs playback.
 - Browser rendering and transport controls remain outside the note scheduling path and never receive an API key.
+- Browser mix commands become bounded MIDI CC messages on the session queue; browser visuals consume copied event metadata, never audio callbacks.
 
 ## MVP success criteria
 
