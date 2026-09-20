@@ -24,6 +24,10 @@ public enum MusicalStateError: Error, CustomStringConvertible, Equatable {
     case invalidTempo(Double)
     case invalidBeatsPerBar(Int)
     case nonMonotonicEvent(offsetMicroseconds: UInt64)
+    case eventBeforeCompletedBoundary(
+        offsetMicroseconds: UInt64,
+        completedThroughMicroseconds: UInt64
+    )
     case eventAfterFinish
 
     public var description: String {
@@ -34,6 +38,8 @@ public enum MusicalStateError: Error, CustomStringConvertible, Equatable {
             return "Beats per bar must be between 1 and 16; received \(beats)."
         case let .nonMonotonicEvent(offset):
             return "MIDI event at \(offset) microseconds is earlier than the preceding event."
+        case let .eventBeforeCompletedBoundary(offset, completedThrough):
+            return "MIDI event at \(offset) microseconds arrived after the window through \(completedThrough) microseconds was completed."
         case .eventAfterFinish:
             return "Cannot ingest events after the musical-state tracker has finished."
         }
@@ -188,6 +194,7 @@ public struct MusicalStateTracker: Sendable {
     private var heldNotes: [NoteKey: HeldNote] = [:]
     private var lastEventOffset: UInt64?
     private var lastAdvanceOffset: UInt64?
+    private var completedThroughMicroseconds: UInt64 = 0
     private var isFinished = false
 
     public init(configuration: MusicalStateConfiguration) {
@@ -200,7 +207,13 @@ public struct MusicalStateTracker: Sendable {
         guard !isFinished else {
             throw MusicalStateError.eventAfterFinish
         }
-        if event.offsetMicroseconds < latestProcessedOffset {
+        if event.offsetMicroseconds < completedThroughMicroseconds {
+            throw MusicalStateError.eventBeforeCompletedBoundary(
+                offsetMicroseconds: event.offsetMicroseconds,
+                completedThroughMicroseconds: completedThroughMicroseconds
+            )
+        }
+        if let lastEventOffset, event.offsetMicroseconds < lastEventOffset {
             throw MusicalStateError.nonMonotonicEvent(
                 offsetMicroseconds: event.offsetMicroseconds
             )
@@ -325,6 +338,7 @@ public struct MusicalStateTracker: Sendable {
                 barOnsets.removeAll(keepingCapacity: true)
             }
 
+            completedThroughMicroseconds = beatEnd
             nextBeatNumber += 1
         }
 

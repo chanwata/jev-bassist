@@ -523,6 +523,13 @@ private final class JamSession: @unchecked Sendable {
         )
         do {
             try process(engine.ingest(sessionEvent), anchorHostTime: anchorHostTime)
+        } catch let error as MusicalStateError {
+            switch error {
+            case .nonMonotonicEvent, .eventBeforeCompletedBoundary:
+                print("warning: dropped late MIDI event: \(error)")
+            default:
+                fail(error)
+            }
         } catch {
             fail(error)
         }

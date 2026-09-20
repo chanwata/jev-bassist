@@ -96,7 +96,27 @@ final class MusicalStateTrackerTests: XCTestCase {
         XCTAssertTrue(boundaryEventSnapshots.isEmpty)
         XCTAssertEqual(secondBeat.count, 1)
         XCTAssertEqual(secondBeat[0].state.noteOnCount, 1)
-        XCTAssertThrowsError(try tracker.ingest(event(at: 999_999, note: 62)))
+        XCTAssertThrowsError(try tracker.ingest(event(at: 999_999, note: 62))) { error in
+            XCTAssertEqual(
+                error as? MusicalStateError,
+                .eventBeforeCompletedBoundary(
+                    offsetMicroseconds: 999_999,
+                    completedThroughMicroseconds: 1_000_000
+                )
+            )
+        }
+    }
+
+    func testEventMayArriveBehindLiveClockWithinOpenBeat() throws {
+        var tracker = try makeTracker()
+
+        XCTAssertTrue(try tracker.advance(through: 230_000).isEmpty)
+        XCTAssertTrue(try tracker.ingest(event(at: 221_341, note: 60)).isEmpty)
+        let snapshots = try tracker.advance(through: 500_000)
+
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[0].state.noteOnCount, 1)
+        XCTAssertEqual(snapshots[0].state.averageNote, 60)
     }
 
     func testRejectsOutOfOrderEventsAndIngestAfterFinish() throws {
