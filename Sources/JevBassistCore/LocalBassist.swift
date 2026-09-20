@@ -63,8 +63,45 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
     }
 }
 
+public enum BassDecisionSource: String, Codable, Equatable, Sendable {
+    case rules
+    case jev
+    case fallback
+}
+
+public struct BassDecisionResolution: Codable, Equatable, Sendable {
+    public let decision: BassDecision
+    public let source: BassDecisionSource
+
+    public init(decision: BassDecision, source: BassDecisionSource) {
+        self.decision = decision
+        self.source = source
+    }
+}
+
 public protocol BassDecisionProvider: Sendable {
+    /// Starts any work needed for a future bar. Implementations must return
+    /// immediately; live MIDI scheduling never waits for this work.
+    func prepare(_ input: BassDecisionInput)
+
     func decision(for input: BassDecisionInput) -> BassDecision
+
+    /// Resolves an already prepared decision without waiting. Remote
+    /// implementations return a deterministic local fallback when no result is
+    /// ready at the boundary.
+    func resolution(for input: BassDecisionInput) -> BassDecisionResolution
+
+    func cancelPendingDecisions()
+}
+
+public extension BassDecisionProvider {
+    func prepare(_ input: BassDecisionInput) {}
+
+    func resolution(for input: BassDecisionInput) -> BassDecisionResolution {
+        BassDecisionResolution(decision: decision(for: input), source: .rules)
+    }
+
+    func cancelPendingDecisions() {}
 }
 
 /// A deliberately small baseline policy. It leaves space when the player is
@@ -335,6 +372,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
     public let chord: ChordCandidate?
     public let usedHeldChord: Bool
     public let decision: BassDecision
+    public let decisionSource: BassDecisionSource
     public let phrase: BassPhrase
 
     public init(
@@ -343,6 +381,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         chord: ChordCandidate?,
         usedHeldChord: Bool,
         decision: BassDecision,
+        decisionSource: BassDecisionSource = .rules,
         phrase: BassPhrase
     ) {
         self.sourceBarIndex = sourceBarIndex
@@ -350,6 +389,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         self.chord = chord
         self.usedHeldChord = usedHeldChord
         self.decision = decision
+        self.decisionSource = decisionSource
         self.phrase = phrase
     }
 }
@@ -440,6 +480,10 @@ public struct LocalBassistEngine: Sendable {
         makeUpdate(from: try tracker.finish(through: offsetMicroseconds))
     }
 
+    public func cancelPendingDecisions() {
+        decisionProvider.cancelPendingDecisions()
+    }
+
     private mutating func makeUpdate(
         from snapshots: [MusicalStateSnapshot]
     ) -> LocalBassistUpdate {
@@ -453,38 +497,49 @@ public struct LocalBassistEngine: Sendable {
                 barsWithoutChord += 1
             }
 
-            guard snapshot.barIndex + 1 >= configuration.introBars else {
-                continue
-            }
-
             let mayHoldChord = barsWithoutChord <= configuration.maximumHeldChordBars
             let resolvedChord = currentChord ?? (mayHoldChord ? lastChord : nil)
             let usedHeldChord = currentChord == nil && resolvedChord != nil
             let targetBarIndex = snapshot.barIndex + 1
-            let input = BassDecisionInput(
-                state: snapshot.state,
-                chord: resolvedChord,
-                isHeldChord: usedHeldChord,
-                targetBarIndex: targetBarIndex
-            )
-            let decision = decisionProvider.decision(for: input)
-            let phrase = phraseGenerator.generate(
-                decision: decision,
-                chord: resolvedChord,
-                barIndex: targetBarIndex,
-                startMicroseconds: snapshot.endMicroseconds,
-                musicalStateConfiguration: configuration.musicalState
-            )
-            plans.append(
-                BassBarPlan(
-                    sourceBarIndex: snapshot.barIndex,
-                    targetBarIndex: targetBarIndex,
+            if targetBarIndex >= configuration.introBars {
+                let input = BassDecisionInput(
+                    state: snapshot.state,
                     chord: resolvedChord,
-                    usedHeldChord: usedHeldChord,
-                    decision: decision,
-                    phrase: phrase
+                    isHeldChord: usedHeldChord,
+                    targetBarIndex: targetBarIndex
                 )
-            )
+                let resolution = decisionProvider.resolution(for: input)
+                let phrase = phraseGenerator.generate(
+                    decision: resolution.decision,
+                    chord: resolvedChord,
+                    barIndex: targetBarIndex,
+                    startMicroseconds: snapshot.endMicroseconds,
+                    musicalStateConfiguration: configuration.musicalState
+                )
+                plans.append(
+                    BassBarPlan(
+                        sourceBarIndex: snapshot.barIndex,
+                        targetBarIndex: targetBarIndex,
+                        chord: resolvedChord,
+                        usedHeldChord: usedHeldChord,
+                        decision: resolution.decision,
+                        decisionSource: resolution.source,
+                        phrase: phrase
+                    )
+                )
+            }
+
+            let preparedTargetBarIndex = targetBarIndex + 1
+            if preparedTargetBarIndex >= configuration.introBars {
+                decisionProvider.prepare(
+                    BassDecisionInput(
+                        state: snapshot.state,
+                        chord: resolvedChord,
+                        isHeldChord: usedHeldChord,
+                        targetBarIndex: preparedTargetBarIndex
+                    )
+                )
+            }
         }
         return LocalBassistUpdate(snapshots: snapshots, plans: plans)
     }

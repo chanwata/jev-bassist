@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import JevBassistCore
 
@@ -115,6 +116,34 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertFalse(plans[0].phrase.messages.isEmpty)
     }
 
+    func testEnginePrefetchesRemoteDecisionOneBarBeforeFirstBassPlan() throws {
+        let provider = ImmediatePreparedProvider()
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(
+                    tempoBPM: 120,
+                    beatsPerBar: 4
+                ),
+                introBars: 4,
+                outputChannel: 3
+            ),
+            decisionProvider: provider
+        )
+        var plans: [BassBarPlan] = []
+
+        for bar in 0..<4 {
+            let start = UInt64(bar) * 2_000_000
+            plans += try ingestTriad(at: start, into: &engine)
+            plans += try engine.advance(through: start + 2_000_000).plans
+        }
+
+        XCTAssertEqual(provider.preparedTargets, [4, 5])
+        XCTAssertEqual(provider.resolvedTargets, [4])
+        XCTAssertEqual(plans.count, 1)
+        XCTAssertEqual(plans[0].decisionSource, .jev)
+        XCTAssertEqual(plans[0].decision.activity, .busy)
+    }
+
     func testEngineHoldsChordForTwoSilentBarsThenFallsBackToRest() throws {
         var engine = try makeEngine(introBars: 0, maximumHeldChordBars: 2)
         _ = try ingestTriad(at: 0, into: &engine)
@@ -194,6 +223,59 @@ final class LocalBassistTests: XCTestCase {
             heldNotes: [],
             pulse: nil,
             chordCandidates: []
+        )
+    }
+}
+
+private final class ImmediatePreparedProvider: BassDecisionProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var prepared: Set<Int> = []
+    private var recordedPreparedTargets: [Int] = []
+    private var recordedResolvedTargets: [Int] = []
+
+    var preparedTargets: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedPreparedTargets
+    }
+
+    var resolvedTargets: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedResolvedTargets
+    }
+
+    func prepare(_ input: BassDecisionInput) {
+        lock.lock()
+        prepared.insert(input.targetBarIndex)
+        recordedPreparedTargets.append(input.targetBarIndex)
+        lock.unlock()
+    }
+
+    func decision(for input: BassDecisionInput) -> BassDecision {
+        RuleBasedBassDecisionProvider().decision(for: input)
+    }
+
+    func resolution(for input: BassDecisionInput) -> BassDecisionResolution {
+        lock.lock()
+        recordedResolvedTargets.append(input.targetBarIndex)
+        let wasPrepared = prepared.remove(input.targetBarIndex) != nil
+        lock.unlock()
+        guard wasPrepared else {
+            return BassDecisionResolution(
+                decision: decision(for: input),
+                source: .fallback
+            )
+        }
+        return BassDecisionResolution(
+            decision: BassDecision(
+                activity: .busy,
+                relationship: .contrast,
+                motion: .approach,
+                fill: true,
+                confidence: 0.9
+            ),
+            source: .jev
         )
     }
 }

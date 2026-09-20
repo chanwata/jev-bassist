@@ -2,11 +2,17 @@ import Darwin
 import Dispatch
 import Foundation
 import JevBassistCore
+import JevBassistJev
 import JevBassistMIDI
 
 private struct SoundcheckOptions {
     let destination: String
     let channel: UInt8
+}
+
+private enum BrainMode: String, Sendable {
+    case rules
+    case jev
 }
 
 private struct JamOptions: Sendable {
@@ -17,6 +23,7 @@ private struct JamOptions: Sendable {
     let inputChannel: UInt8
     let outputChannel: UInt8
     let introBars: Int
+    let brain: BrainMode
 }
 
 private enum Command {
@@ -130,7 +137,7 @@ private enum Command {
             in: arguments,
             allowed: [
                 "--source", "--destination", "--bpm", "--beats-per-bar",
-                "--input-channel", "--output-channel", "--intro-bars"
+                "--input-channel", "--output-channel", "--intro-bars", "--brain"
             ],
             usage: "jam --source NAME --destination NAME [options]"
         )
@@ -145,6 +152,10 @@ private enum Command {
         let beatsPerBar = try intOption(options, name: "--beats-per-bar", default: 4)
         let introBars = try intOption(options, name: "--intro-bars", default: 4)
         let outputChannel = try channelOption(options, name: "--output-channel", default: 3)
+        let brainName = options["--brain"] ?? BrainMode.rules.rawValue
+        guard let brain = BrainMode(rawValue: brainName) else {
+            throw CLIError.invalidArguments("--brain must be 'rules' or 'jev'.")
+        }
         let musicalState = try MusicalStateConfiguration(
             tempoBPM: tempoBPM,
             beatsPerBar: beatsPerBar
@@ -161,7 +172,8 @@ private enum Command {
             beatsPerBar: beatsPerBar,
             inputChannel: try channelOption(options, name: "--input-channel", default: 1),
             outputChannel: outputChannel,
-            introBars: introBars
+            introBars: introBars,
+            brain: brain
         )
     }
 
@@ -257,7 +269,7 @@ USAGE
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N] [--brain rules|jev]
   jev-bassist help
 
 COMMANDS
@@ -267,7 +279,7 @@ COMMANDS
   capture      Record a versioned JSON fixture. Press Return to stop and save.
   replay       Replay into the analyzer and print state. No MIDI output is sent.
   soundcheck   Send three short bass notes to one destination, then silence it.
-  jam          Listen locally and schedule rule-based bass after the intro. Press Return to stop.
+  jam          Listen locally and schedule bass after the intro. Press Return to stop.
 """
 
 private func printSources(_ sources: [MIDISource]) {
@@ -335,7 +347,23 @@ private func format(_ plan: BassBarPlan) -> String {
         .filter { $0.kind == .noteOn }
         .map { MIDINoteName.name(for: $0.note) }
         .joined(separator: ",")
-    return "bass bar=\(plan.targetBarIndex + 1) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
+    return "bass bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
+}
+
+private let jevTraceLock = NSLock()
+
+private func log(_ trace: JevDecisionTrace) {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.sortedKeys]
+    guard let data = try? encoder.encode(trace) else {
+        return
+    }
+    jevTraceLock.lock()
+    defer { jevTraceLock.unlock() }
+    FileHandle.standardError.write(Data("jev-trace ".utf8))
+    FileHandle.standardError.write(data)
+    FileHandle.standardError.write(Data("\n".utf8))
 }
 
 private func fileURL(for path: String) -> URL {
@@ -462,12 +490,34 @@ private final class JamSession: @unchecked Sendable {
             tempoBPM: options.tempoBPM,
             beatsPerBar: options.beatsPerBar
         )
+        let decisionProvider: any BassDecisionProvider
+        switch options.brain {
+        case .rules:
+            decisionProvider = RuleBasedBassDecisionProvider()
+        case .jev:
+            guard let apiKey = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"],
+                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw CLIError.invalidArguments(
+                    "--brain jev requires TYPESAFE_API_KEY in the environment."
+                )
+            }
+            let barMilliseconds = 60_000 * Double(options.beatsPerBar) / options.tempoBPM
+            let deadlineMilliseconds = UInt64(
+                min(750, max(100, barMilliseconds - 50)).rounded(.down)
+            )
+            decisionProvider = JevDecisionProvider(
+                apiKey: apiKey,
+                deadlineMilliseconds: deadlineMilliseconds,
+                traceHandler: log
+            )
+        }
         engine = LocalBassistEngine(
             configuration: try LocalBassistConfiguration(
                 musicalState: musicalState,
                 introBars: options.introBars,
                 outputChannel: options.outputChannel
-            )
+            ),
+            decisionProvider: decisionProvider
         )
     }
 
@@ -485,6 +535,7 @@ private final class JamSession: @unchecked Sendable {
             stopped = true
             timer?.cancel()
             timer = nil
+            engine.cancelPendingDecisions()
             do {
                 try output.stop(channel: options.outputChannel)
             } catch {
@@ -595,6 +646,7 @@ private final class JamSession: @unchecked Sendable {
         failureDescription = String(describing: error)
         timer?.cancel()
         timer = nil
+        engine.cancelPendingDecisions()
         try? output.stop(channel: options.outputChannel)
         stopSignal()
     }
@@ -616,6 +668,7 @@ private func runJam(_ options: JamOptions) throws {
 
     print("Listening to \(connectedSources.map(\.name).joined(separator: ", ")) on channel \(options.inputChannel).")
     print("Bass output: \(destination.name), channel \(options.outputChannel), \(options.tempoBPM) BPM, \(options.beatsPerBar)/4.")
+    print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
     print("Play one note to start the bar clock. Press Return to stop safely.")
     DispatchQueue.global(qos: .userInitiated).async {
         _ = readLine()
