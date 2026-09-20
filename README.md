@@ -49,7 +49,7 @@ JD-Xi MIDI OUT -> UR22mkII MIDI IN   (your playing reaches the Mac)
 UR22mkII MIDI OUT -> JD-Xi MIDI IN   (the generated bass reaches the JD-Xi)
 ```
 
-This needs two 5-pin MIDI cables. Keep the JD-Xi's MIDI `Soft Thru` setting off to avoid a hardware feedback loop, and monitor audio from the JD-Xi itself. A direct JD-Xi USB MIDI connection is another valid route if its Roland driver exposes both a CoreMIDI source and destination.
+This needs two 5-pin MIDI cables. Set the JD-Xi's `Local Switch` to **On** so the keyboard plays the selected human part directly, and keep `Soft Thru` **Off** to avoid a hardware feedback loop. The application listens to the human channel but deliberately does not echo it back; only generated bass is sent to the output. Monitor audio from the JD-Xi itself. A direct JD-Xi USB MIDI connection is another valid route if its Roland driver exposes both a CoreMIDI source and destination.
 
 The JD-Xi uses separate MIDI channels for its four parts: Digital Synth 1 on 1, Digital Synth 2 on 2, Analog Synth on 3, and Drums on 10. The examples listen to the played Digital Synth 1 part on channel 1 and send bass to the Analog Synth part on channel 3. Select a bass sound for that part before starting. See Roland's [JD-Xi manuals and MIDI implementation](https://www.roland.com/global/support/by_product/jd-xi/owners_manuals/) for the instrument-side settings.
 
