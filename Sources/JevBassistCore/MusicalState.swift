@@ -187,6 +187,7 @@ public struct MusicalStateTracker: Sendable {
     private var pulseOnsets: [UInt64] = []
     private var heldNotes: [NoteKey: HeldNote] = [:]
     private var lastEventOffset: UInt64?
+    private var lastAdvanceOffset: UInt64?
     private var isFinished = false
 
     public init(configuration: MusicalStateConfiguration) {
@@ -199,7 +200,7 @@ public struct MusicalStateTracker: Sendable {
         guard !isFinished else {
             throw MusicalStateError.eventAfterFinish
         }
-        if let lastEventOffset, event.offsetMicroseconds < lastEventOffset {
+        if event.offsetMicroseconds < latestProcessedOffset {
             throw MusicalStateError.nonMonotonicEvent(
                 offsetMicroseconds: event.offsetMicroseconds
             )
@@ -233,19 +234,43 @@ public struct MusicalStateTracker: Sendable {
         return snapshots
     }
 
+    /// Advances the deterministic beat grid without ending the session. Live
+    /// callers use this to emit silent beat and bar snapshots when no MIDI
+    /// events arrive.
+    public mutating func advance(
+        through offsetMicroseconds: UInt64
+    ) throws -> [MusicalStateSnapshot] {
+        guard !isFinished else {
+            throw MusicalStateError.eventAfterFinish
+        }
+        guard offsetMicroseconds >= latestProcessedOffset else {
+            throw MusicalStateError.nonMonotonicEvent(
+                offsetMicroseconds: offsetMicroseconds
+            )
+        }
+
+        lastAdvanceOffset = offsetMicroseconds
+        return advanceBoundaries(through: offsetMicroseconds)
+    }
+
     public mutating func finish(
         through offsetMicroseconds: UInt64
     ) throws -> [MusicalStateSnapshot] {
         guard !isFinished else {
             return []
         }
-        if let lastEventOffset, offsetMicroseconds < lastEventOffset {
+        if offsetMicroseconds < latestProcessedOffset {
             throw MusicalStateError.nonMonotonicEvent(
                 offsetMicroseconds: offsetMicroseconds
             )
         }
         isFinished = true
+        lastAdvanceOffset = offsetMicroseconds
         return advanceBoundaries(through: offsetMicroseconds)
+    }
+
+    private var latestProcessedOffset: UInt64 {
+        max(lastEventOffset ?? 0, lastAdvanceOffset ?? 0)
     }
 
     private mutating func advanceBoundaries(

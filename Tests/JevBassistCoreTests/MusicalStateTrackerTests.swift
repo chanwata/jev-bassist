@@ -84,6 +84,21 @@ final class MusicalStateTrackerTests: XCTestCase {
         XCTAssertTrue(snapshots.allSatisfy { $0.state.pulse == nil })
     }
 
+    func testAdvanceEmitsSilentWindowsWithoutFinishingAndRejectsLateEvents() throws {
+        var tracker = try makeTracker()
+
+        let firstBeat = try tracker.advance(through: 500_000)
+        let boundaryEventSnapshots = try tracker.ingest(event(at: 500_000, note: 60))
+        let secondBeat = try tracker.advance(through: 1_000_000)
+
+        XCTAssertEqual(firstBeat.count, 1)
+        XCTAssertEqual(firstBeat[0].state.noteOnCount, 0)
+        XCTAssertTrue(boundaryEventSnapshots.isEmpty)
+        XCTAssertEqual(secondBeat.count, 1)
+        XCTAssertEqual(secondBeat[0].state.noteOnCount, 1)
+        XCTAssertThrowsError(try tracker.ingest(event(at: 999_999, note: 62)))
+    }
+
     func testRejectsOutOfOrderEventsAndIngestAfterFinish() throws {
         var tracker = try makeTracker()
         _ = try tracker.ingest(event(at: 200, note: 60))
