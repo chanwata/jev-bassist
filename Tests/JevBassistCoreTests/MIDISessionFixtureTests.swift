@@ -109,6 +109,29 @@ final class MIDISessionFixtureTests: XCTestCase {
         }
     }
 
+    func testWritesFixtureAndRefusesToOverwriteExistingFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("session.json")
+        let fixture = try MIDISessionFixture(
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            durationMicroseconds: 100,
+            sourceNames: ["test"],
+            events: [sessionEvent(at: 100, note: 60)]
+        )
+
+        try MIDISessionFixtureCodec.write(fixture, to: url)
+
+        let decoded = try MIDISessionFixtureCodec.decode(Data(contentsOf: url))
+        XCTAssertEqual(decoded, fixture)
+        XCTAssertThrowsError(try MIDISessionFixtureCodec.write(fixture, to: url))
+    }
+
     private func event(at date: Date, note: UInt8) -> MIDIEvent {
         MIDIEvent(
             receivedAt: date,
