@@ -55,11 +55,12 @@ final class MusicalStateTrackerTests: XCTestCase {
 
     func testQuarterNoteOnsetsEstimate120BPMAndEmitBarSnapshot() throws {
         var tracker = try makeTracker()
+        var snapshots: [MusicalStateSnapshot] = []
         for offset in stride(from: UInt64(0), through: 1_500_000, by: 500_000) {
-            _ = try tracker.ingest(event(at: offset, note: 60))
+            snapshots += try tracker.ingest(event(at: offset, note: 60))
         }
 
-        let snapshots = try tracker.finish(through: 2_000_000)
+        snapshots += try tracker.finish(through: 2_000_000)
         let bar = try XCTUnwrap(snapshots.last)
 
         XCTAssertEqual(snapshots.filter { $0.boundary == .beat }.count, 4)
