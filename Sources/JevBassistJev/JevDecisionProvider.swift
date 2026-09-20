@@ -44,6 +44,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
     public let pulseBPM: Double?
     public let pulseConfidence: Double?
     public let chord: JevChordState?
+    public let nextChord: JevChordState?
     public let isHeldChord: Bool
 
     public init(input: BassDecisionInput) {
@@ -71,6 +72,13 @@ public struct JevBassState: Codable, Equatable, Sendable {
                 confidence: $0.confidence
             )
         }
+        nextChord = input.nextChord.map {
+            JevChordState(
+                root: $0.rootName,
+                quality: $0.quality.rawValue,
+                confidence: $0.confidence
+            )
+        }
         isHeldChord = input.isHeldChord
     }
 
@@ -87,6 +95,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
         case pulseBPM = "pulse_bpm"
         case pulseConfidence = "pulse_confidence"
         case chord
+        case nextChord = "next_chord"
         case isHeldChord = "is_held_chord"
     }
 }
@@ -159,12 +168,12 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             criteria: [
                 "root": "Anchor the phrase primarily on the chord root.",
                 "step": "Move through nearby chord tones in a smooth supportive line.",
-                "approach": "Alternate the root with a chromatic approach into it.",
+                "approach": "Use a restrained chromatic approach only when a following chord is supplied.",
                 "leap": "Alternate root and fifth for a wider but still stable motion."
             ]
         ),
         fill: JevNoulQuestion(
-            instructions: "Should the final bass attack become a restrained approach note into the following bar?",
+            instructions: "Should the final bass attack approach the supplied following chord? Choose false when no following chord is supplied.",
             criteria: JevNoulCriteria(
                 trueDescription: "The target bar closes a phrase and the human leaves enough space for a small fill.",
                 falseDescription: "The player is dense, harmony is uncertain, or a plain ending would listen better."

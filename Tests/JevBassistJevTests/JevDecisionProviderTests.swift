@@ -18,6 +18,7 @@ final class JevDecisionProviderTests: XCTestCase {
         XCTAssertEqual(object["model"] as? String, "jev-latest")
         XCTAssertEqual(state["target_bar_index"] as? Int, 4)
         XCTAssertEqual(state["note_density_per_beat"] as? Double, 1)
+        XCTAssertEqual((state["next_chord"] as? [String: Any])?["root"] as? String, "G")
         XCTAssertEqual(activity["type"] as? String, "choice")
         XCTAssertNotNil(activity["criteria"] as? [String: String])
         XCTAssertEqual(fill["type"] as? String, "noul")
@@ -153,6 +154,11 @@ final class JevDecisionProviderTests: XCTestCase {
                 rootPitchClass: 0,
                 quality: .major,
                 confidence: 0.9
+            ),
+            nextChord: ChordCandidate(
+                rootPitchClass: 7,
+                quality: .major,
+                confidence: 1
             ),
             isHeldChord: false,
             targetBarIndex: targetBarIndex

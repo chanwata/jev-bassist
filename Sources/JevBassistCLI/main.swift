@@ -25,6 +25,7 @@ private struct JamOptions: Sendable {
     let introBars: Int
     let brain: BrainMode
     let webUI: Bool
+    let progression: [ChordCandidate]
 }
 
 private enum Command {
@@ -143,7 +144,8 @@ private enum Command {
             in: valueArguments,
             allowed: [
                 "--source", "--destination", "--bpm", "--beats-per-bar",
-                "--input-channel", "--output-channel", "--intro-bars", "--brain"
+                "--input-channel", "--output-channel", "--intro-bars", "--brain",
+                "--progression"
             ],
             usage: "jam --source NAME --destination NAME [options]"
         )
@@ -162,6 +164,12 @@ private enum Command {
         guard let brain = BrainMode(rawValue: brainName) else {
             throw CLIError.invalidArguments("--brain must be 'rules' or 'jev'.")
         }
+        let progression: [ChordCandidate]
+        if let progressionText = options["--progression"] {
+            progression = try ChordProgressionParser.parse(progressionText)
+        } else {
+            progression = []
+        }
         let musicalState = try MusicalStateConfiguration(
             tempoBPM: tempoBPM,
             beatsPerBar: beatsPerBar
@@ -169,7 +177,8 @@ private enum Command {
         _ = try LocalBassistConfiguration(
             musicalState: musicalState,
             introBars: introBars,
-            outputChannel: outputChannel
+            outputChannel: outputChannel,
+            progression: progression
         )
         return JamOptions(
             source: source,
@@ -180,7 +189,8 @@ private enum Command {
             outputChannel: outputChannel,
             introBars: introBars,
             brain: brain,
-            webUI: webUICount == 1
+            webUI: webUICount == 1,
+            progression: progression
         )
     }
 
@@ -276,7 +286,7 @@ USAGE
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N] [--brain rules|jev] [--ui]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N] [--brain rules|jev] [--progression CHORDS] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -530,7 +540,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             configuration: try LocalBassistConfiguration(
                 musicalState: musicalState,
                 introBars: options.introBars,
-                outputChannel: options.outputChannel
+                outputChannel: options.outputChannel,
+                progression: options.progression
             ),
             decisionProvider: decisionProvider
         )
@@ -611,6 +622,9 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         )
         do {
             try process(engine.ingest(sessionEvent), anchorHostTime: anchorHostTime)
+            if event.kind == .noteOn {
+                publishState(elapsedMicroseconds: offset)
+            }
         } catch let error as MusicalStateError {
             switch error {
             case .nonMonotonicEvent, .eventBeforeCompletedBoundary:
@@ -723,11 +737,20 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 bar: barIndex.map { $0 + 1 },
                 beat: absoluteBeat.map { $0 % options.beatsPerBar + 1 },
                 phase: phase,
-                chord: lastChord,
+                chord: barIndex.flatMap { progressionChord(for: $0)?.displayName } ?? lastChord,
+                nextChord: barIndex.flatMap { progressionChord(for: $0 + 1)?.displayName },
                 decisionSource: lastDecisionSource,
                 lastNote: lastNote
             )
         )
+    }
+
+    private func progressionChord(for barIndex: Int) -> ChordCandidate? {
+        guard !options.progression.isEmpty, barIndex >= options.introBars else {
+            return nil
+        }
+        let index = (barIndex - options.introBars) % options.progression.count
+        return options.progression[index]
     }
 
     private func fail(_ error: Error) {
@@ -772,6 +795,11 @@ private func runJam(_ options: JamOptions) throws {
     print("Listening to \(connectedSources.map(\.name).joined(separator: ", ")) on channel \(options.inputChannel).")
     print("Bass output: \(destination.name), channel \(options.outputChannel), \(options.tempoBPM) BPM, \(options.beatsPerBar)/4.")
     print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
+    if !options.progression.isEmpty {
+        print("Harmony: \(options.progression.map(\.displayName).joined(separator: " → ")) (loops after the intro).")
+    } else {
+        print("Harmony: live detection (experimental, one-bar response).")
+    }
     if options.webUI {
         print("Shared clock: http://127.0.0.1:8765")
         print("Click Start in the browser. Press Return in this terminal to stop safely.")

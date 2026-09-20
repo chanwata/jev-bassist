@@ -408,7 +408,10 @@
       ui.beats.value = next.beatsPerBar;
       ui.intro.value = next.introBars;
       ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · bass after ${next.introBars} bars`;
-      ui.noteReadout.textContent = `CHORD ${next.chord ?? '—'} · NOTE ${next.lastNote ?? '—'}`;
+      const harmony = next.nextChord
+        ? `${next.chord ?? '—'} → ${next.nextChord}`
+        : (next.chord ?? '—');
+      ui.noteReadout.textContent = `CHORD ${harmony} · NOTE ${next.lastNote ?? '—'}`;
       ui.armButton.disabled = next.running || next.phase === 'stopped';
       ui.resetButton.disabled = next.phase === 'stopped';
       ui.armButton.textContent = next.running ? 'Running' : 'Start';
@@ -450,7 +453,8 @@
         });
         if (introRemaining > 0) {
           ui.phase.textContent = `Intro · bass in ${introRemaining} ${introRemaining === 1 ? 'bar' : 'bars'}`;
-          ui.caption.textContent = `Swift position: bar ${bar}, beat ${beat}. Play while Jev listens and prepares.`;
+          const listener = state.brain === 'jev' ? 'Jev' : 'The local rule engine';
+          ui.caption.textContent = `Swift position: bar ${bar}, beat ${beat}. Play while ${listener} listens and prepares.`;
         } else {
           const source = state.decisionSource ? ` · ${state.decisionSource}` : '';
           ui.phase.textContent = `Live · ${state.brain}${source}`;

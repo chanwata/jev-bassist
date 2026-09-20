@@ -18,7 +18,7 @@ The intended first complete loop is:
 4. A local phrase generator turns that behavior into concrete notes.
 5. A local scheduler sends the notes to a MIDI output without waiting for the network.
 6. Requests, decisions, confidence values, generated notes, and latency are logged for replay and comparison.
-7. An optional browser companion visualizes the same first-note-anchored bar clock without controlling MIDI timing.
+7. An optional loopback browser companion starts/stops the session and visualizes the authoritative Swift bar clock without scheduling MIDI itself.
 
 ## Musical behavior contract
 
@@ -59,7 +59,7 @@ Supporting paths record raw input, derived state, decisions, generated output, a
 - Musical decisions occur at beat, bar, or phrase boundaries rather than once per note.
 - Rule and Jev modes can consume the same recorded performance.
 - A failure or timeout produces a local fallback decision and never hangs playback.
-- Browser rendering remains observational; it never enters the note scheduling path or receives an API key.
+- Browser rendering and transport controls remain outside the note scheduling path and never receive an API key.
 
 ## MVP success criteria
 
@@ -106,9 +106,11 @@ The primary human evaluation is a short rating of “this felt like another play
 - use deadlines, cancellation, and deterministic local fallback;
 - expose `--brain rules|jev`.
 
-### M5: Evaluation harness
+### M5: Musicality and evaluation harness
 
-- provide a browser-based shared bar/beat display anchored by the same first MIDI Note On;
+- provide a browser-based shared bar/beat display driven by the Swift session clock;
+- accept a known looping chord progression so the target and following harmony are available before generation;
+- use following harmony for intentional approaches and avoid chromatic fills when no resolution target is known;
 - replay identical fixtures through both providers;
 - report timing and decision stability;
 - conduct live A/B sessions focused on perceived responsiveness.

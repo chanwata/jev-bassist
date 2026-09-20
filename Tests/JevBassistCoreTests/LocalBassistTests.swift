@@ -265,6 +265,34 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(plans[0].decision.activity, .busy)
     }
 
+    func testEngineUsesPlannedHarmonyAndApproachesTheNextChord() throws {
+        let progression = try ChordProgressionParser.parse("Dm7,G7,Cmaj7,Cmaj7")
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(
+                    tempoBPM: 120,
+                    beatsPerBar: 4
+                ),
+                introBars: 4,
+                outputChannel: 3,
+                progression: progression
+            )
+        )
+        var plans: [BassBarPlan] = []
+        for bar in 1...4 {
+            plans += try engine.advance(through: UInt64(bar) * 2_000_000).plans
+        }
+
+        let firstPlan = try XCTUnwrap(plans.first)
+        XCTAssertEqual(firstPlan.targetBarIndex, 4)
+        XCTAssertEqual(firstPlan.chord, progression[0])
+        XCTAssertFalse(firstPlan.usedHeldChord)
+        XCTAssertEqual(
+            firstPlan.phrase.messages.filter { $0.kind == .noteOn }.last?.note,
+            42
+        )
+    }
+
     func testEngineHoldsChordForTwoSilentBarsThenFallsBackToRest() throws {
         var engine = try makeEngine(introBars: 0, maximumHeldChordBars: 2)
         _ = try ingestTriad(at: 0, into: &engine)

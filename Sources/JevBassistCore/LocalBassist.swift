@@ -47,17 +47,20 @@ public struct BassDecision: Codable, Equatable, Sendable {
 public struct BassDecisionInput: Codable, Equatable, Sendable {
     public let state: MusicalState
     public let chord: ChordCandidate?
+    public let nextChord: ChordCandidate?
     public let isHeldChord: Bool
     public let targetBarIndex: Int
 
     public init(
         state: MusicalState,
         chord: ChordCandidate?,
+        nextChord: ChordCandidate? = nil,
         isHeldChord: Bool,
         targetBarIndex: Int
     ) {
         self.state = state
         self.chord = chord
+        self.nextChord = nextChord
         self.isHeldChord = isHeldChord
         self.targetBarIndex = targetBarIndex
     }
@@ -578,12 +581,14 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
     public let introBars: Int
     public let maximumHeldChordBars: Int
     public let outputChannel: UInt8
+    public let progression: [ChordCandidate]
 
     public init(
         musicalState: MusicalStateConfiguration,
         introBars: Int = 4,
         maximumHeldChordBars: Int = 2,
-        outputChannel: UInt8 = 3
+        outputChannel: UInt8 = 3,
+        progression: [ChordCandidate] = []
     ) throws {
         guard (0...32).contains(introBars) else {
             throw LocalBassistError.invalidIntroBars(introBars)
@@ -598,6 +603,7 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
         self.introBars = introBars
         self.maximumHeldChordBars = maximumHeldChordBars
         self.outputChannel = outputChannel
+        self.progression = progression
     }
 }
 
@@ -651,13 +657,16 @@ public struct LocalBassistEngine: Sendable {
             }
 
             let mayHoldChord = barsWithoutChord <= configuration.maximumHeldChordBars
-            let resolvedChord = currentChord ?? (mayHoldChord ? lastChord : nil)
-            let usedHeldChord = currentChord == nil && resolvedChord != nil
             let targetBarIndex = snapshot.barIndex + 1
+            let liveChord = currentChord ?? (mayHoldChord ? lastChord : nil)
+            let plannedChord = progressionChord(for: targetBarIndex)
+            let resolvedChord = plannedChord ?? liveChord
+            let usedHeldChord = plannedChord == nil && currentChord == nil && resolvedChord != nil
             if targetBarIndex >= configuration.introBars {
                 let input = BassDecisionInput(
                     state: snapshot.state,
                     chord: resolvedChord,
+                    nextChord: progressionChord(for: targetBarIndex + 1),
                     isHeldChord: usedHeldChord,
                     targetBarIndex: targetBarIndex
                 )
@@ -669,7 +678,8 @@ public struct LocalBassistEngine: Sendable {
                     startMicroseconds: snapshot.endMicroseconds,
                     musicalStateConfiguration: configuration.musicalState,
                     previousBassNote: previousBassNote,
-                    humanAverageVelocity: snapshot.state.averageVelocity
+                    humanAverageVelocity: snapshot.state.averageVelocity,
+                    nextChord: progressionChord(for: targetBarIndex + 1)
                 )
                 previousBassNote = phrase.messages.last(where: { $0.kind == .noteOn })?.note
                     ?? previousBassNote
@@ -688,16 +698,29 @@ public struct LocalBassistEngine: Sendable {
 
             let preparedTargetBarIndex = targetBarIndex + 1
             if preparedTargetBarIndex >= configuration.introBars {
+                let preparedPlannedChord = progressionChord(for: preparedTargetBarIndex)
+                let preparedChord = preparedPlannedChord ?? liveChord
                 decisionProvider.prepare(
                     BassDecisionInput(
                         state: snapshot.state,
-                        chord: resolvedChord,
-                        isHeldChord: usedHeldChord,
+                        chord: preparedChord,
+                        nextChord: progressionChord(for: preparedTargetBarIndex + 1),
+                        isHeldChord: preparedPlannedChord == nil
+                            && currentChord == nil
+                            && preparedChord != nil,
                         targetBarIndex: preparedTargetBarIndex
                     )
                 )
             }
         }
         return LocalBassistUpdate(snapshots: snapshots, plans: plans)
+    }
+
+    private func progressionChord(for barIndex: Int) -> ChordCandidate? {
+        guard !configuration.progression.isEmpty, barIndex >= configuration.introBars else {
+            return nil
+        }
+        let index = (barIndex - configuration.introBars) % configuration.progression.count
+        return configuration.progression[index]
     }
 }

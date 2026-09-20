@@ -15,6 +15,7 @@ struct JamWebState: Codable, Sendable {
     let beat: Int?
     let phase: String
     let chord: String?
+    let nextChord: String?
     let decisionSource: String?
     let lastNote: String?
 }
@@ -75,13 +76,13 @@ final class JamWebServer: @unchecked Sendable {
     }
 
     func publish(_ state: JamWebState) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(state) else {
-            return
-        }
         queue.async { [weak self] in
             guard let self else { return }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let data = try? encoder.encode(state) else {
+                return
+            }
             latestState = data
             let frame = Self.eventFrame(data)
             for (id, connection) in clients {
@@ -131,15 +132,27 @@ final class JamWebServer: @unchecked Sendable {
         case ("GET", "/events"):
             openEventStream(connection)
         case ("POST", "/api/start"):
+            guard isTrustedBrowserRequest(request) else {
+                respond(status: "403 Forbidden", body: Data(), connection: connection)
+                return
+            }
             controller?.startClockFromWeb()
             respond(status: "202 Accepted", body: Data("starting".utf8), connection: connection)
         case ("POST", "/api/stop"):
+            guard isTrustedBrowserRequest(request) else {
+                respond(status: "403 Forbidden", body: Data(), connection: connection)
+                return
+            }
             respond(status: "202 Accepted", body: Data("stopping".utf8), connection: connection) {
                 self.stopSignal()
             }
         default:
             respond(status: "404 Not Found", body: Data("not found".utf8), connection: connection)
         }
+    }
+
+    private func isTrustedBrowserRequest(_ request: String) -> Bool {
+        request.lowercased().contains("\r\norigin: http://127.0.0.1:8765\r\n")
     }
 
     private func openEventStream(_ connection: NWConnection) {

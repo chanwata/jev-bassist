@@ -91,6 +91,21 @@ swift run jev-bassist jam \
 
 Play the first note exactly where bar 1 should begin; that Note On starts the configured bar clock. After four complete human-only bars, the first bass phrase is scheduled for bar 5. Press `Return` to stop safely. `--beats-per-bar` defaults to `4`, and `--intro-bars` defaults to `4`.
 
+For reliable harmony, provide a looping chord progression. Its first chord begins with the first bass bar after the intro:
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 120 \
+  --input-channel 1 \
+  --output-channel 3 \
+  --progression "Dm7,G7,Cmaj7,Cmaj7" \
+  --brain rules
+```
+
+Common major, minor, dominant-seventh, major-seventh, minor-seventh, and diminished symbols are accepted, including sharps and flats. The current engine reduces seventh chords to their major/minor triad family, then uses the following chord as the target for restrained fills and chromatic approaches. Without `--progression`, live chord detection remains available as an experimental one-bar response mode.
+
 The M3 rule policy is intentionally conservative:
 
 - no usable chord means rest;
@@ -118,6 +133,7 @@ swift run jev-bassist jam \
   --input-channel 1 \
   --output-channel 3 \
   --intro-bars 4 \
+  --progression "Dm7,G7,Cmaj7,Cmaj7" \
   --brain jev \
   --ui
 ```
