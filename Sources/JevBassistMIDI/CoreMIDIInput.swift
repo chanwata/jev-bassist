@@ -145,6 +145,13 @@ public final class CoreMIDIInput {
         return selected
     }
 
+    /// Waits until events already copied from CoreMIDI have been decoded and
+    /// delivered. Call this from the owning control thread, never from an event
+    /// handler.
+    public func flushPendingEvents() {
+        processingQueue.sync {}
+    }
+
     private func receive(
         _ packetList: UnsafePointer<MIDIPacketList>,
         sourceID: MIDIEndpointRef
