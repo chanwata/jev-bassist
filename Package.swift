@@ -26,7 +26,9 @@ let package = Package(
         ),
         .executableTarget(
             name: "JevBassistCLI",
-            dependencies: ["JevBassistCore", "JevBassistJev", "JevBassistMIDI"]
+            dependencies: ["JevBassistCore", "JevBassistJev", "JevBassistMIDI"],
+            resources: [.process("Resources")],
+            linkerSettings: [.linkedFramework("Network")]
         ),
         .testTarget(
             name: "JevBassistCoreTests",

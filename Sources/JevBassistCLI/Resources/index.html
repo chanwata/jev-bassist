@@ -318,7 +318,7 @@
   <div class="shell">
     <header>
       <div class="brand">JEV/BASSIST <span>shared clock</span></div>
-      <div class="connection" id="connection"><i class="dot"></i><span id="connectionText">MIDI offline</span></div>
+      <div class="connection" id="connection"><i class="dot"></i><span id="connectionText">Connecting to Swift</span></div>
     </header>
 
     <main>
@@ -338,43 +338,43 @@
           </div>
         </div>
         <div class="beat-strip" id="beatStrip"></div>
-        <div class="caption" id="caption">Connect the same MIDI input used by the Swift session. The first Note On starts both clocks.</div>
+        <div class="caption" id="caption">This display follows the clock inside the running Swift session.</div>
       </section>
 
       <aside class="panel">
         <div class="panel-title">
           <h2>Session</h2>
-          <span class="note-readout" id="noteReadout">NOTE —</span>
+          <span class="note-readout" id="noteReadout">CHORD — · NOTE —</span>
         </div>
         <div class="field">
-          <label for="midiInput">MIDI input</label>
-          <select id="midiInput" disabled><option>Connect MIDI first</option></select>
+          <label for="midiInput">Swift MIDI route</label>
+          <input id="midiInput" value="Waiting for session" disabled>
         </div>
         <div class="row">
           <div class="field">
             <label for="bpm">BPM</label>
-            <input id="bpm" type="number" min="20" max="400" step="1" value="120">
+            <input id="bpm" value="—" disabled>
           </div>
           <div class="field">
             <label for="beats">Beats</label>
-            <input id="beats" type="number" min="1" max="16" step="1" value="4">
+            <input id="beats" value="—" disabled>
           </div>
           <div class="field">
             <label for="intro">Intro bars</label>
-            <input id="intro" type="number" min="0" max="32" step="1" value="4">
+            <input id="intro" value="—" disabled>
           </div>
         </div>
         <div class="actions">
-          <button class="primary" id="armButton">Connect MIDI</button>
-          <button class="secondary" id="resetButton" type="button">Reset</button>
+          <button class="primary" id="armButton" disabled>Start</button>
+          <button class="secondary" id="resetButton" type="button" disabled>Stop</button>
         </div>
-        <div class="hint" id="hint">Chrome will ask for MIDI permission. No note data or API key leaves this browser page.</div>
+        <div class="hint" id="hint">Start this page with <code>jev-bassist jam ... --ui</code>. MIDI and the API key stay in the Swift process.</div>
       </aside>
     </main>
 
     <footer>
-      <span>Clock source · first MIDI note</span>
-      <span id="footerTiming">120 BPM · 4/4 · bass after 4 bars</span>
+      <span>Clock source · Swift / CoreMIDI</span>
+      <span id="footerTiming">Waiting for session</span>
     </footer>
   </div>
 
@@ -385,54 +385,13 @@
       'noteReadout','footerTiming'
     ].map(id => [id, document.getElementById(id)]));
 
-    let midi = null;
-    let activeInput = null;
-    let armed = false;
-    let running = false;
-    let startTime = 0;
+    let state = null;
     let animationFrame = 0;
     let renderedBeat = -1;
 
-    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-    const settings = () => ({
-      bpm: clamp(Number(ui.bpm.value) || 120, 20, 400),
-      beats: clamp(Math.round(Number(ui.beats.value) || 4), 1, 16),
-      intro: clamp(
-        Number.isFinite(Number(ui.intro.value))
-          ? Math.round(Number(ui.intro.value))
-          : 4,
-        0,
-        32
-      )
-    });
-
-    function persist() {
-      const value = settings();
-      localStorage.setItem('jev-bassist-clock', JSON.stringify(value));
-      ui.bpm.value = value.bpm;
-      ui.beats.value = value.beats;
-      ui.intro.value = value.intro;
-      updateStaticUI();
-    }
-
-    function restore() {
-      try {
-        const value = JSON.parse(localStorage.getItem('jev-bassist-clock'));
-        if (value) {
-          ui.bpm.value = value.bpm ?? 120;
-          ui.beats.value = value.beats ?? 4;
-          ui.intro.value = value.intro ?? 4;
-        }
-      } catch (_) {}
-      updateStaticUI();
-    }
-
-    function updateStaticUI() {
-      const value = settings();
-      document.documentElement.style.setProperty('--beats', value.beats);
-      document.documentElement.style.setProperty('--beat-duration', `${60000 / value.bpm}ms`);
-      ui.footerTiming.textContent = `${value.bpm} BPM · ${value.beats}/4 · bass after ${value.intro} bars`;
-      ui.beatStrip.replaceChildren(...Array.from({length: value.beats}, (_, index) => {
+    function rebuildBeats(count) {
+      document.documentElement.style.setProperty('--beats', count);
+      ui.beatStrip.replaceChildren(...Array.from({length: count}, (_, index) => {
         const cell = document.createElement('div');
         cell.className = 'beat-cell';
         cell.dataset.beat = index + 1;
@@ -440,98 +399,46 @@
       }));
     }
 
-    async function connectMIDI() {
-      if (!navigator.requestMIDIAccess) {
-        ui.hint.textContent = 'Web MIDI is unavailable. Open this page in Chrome.';
-        return;
-      }
-      try {
-        midi = await navigator.requestMIDIAccess({sysex: false});
-        midi.onstatechange = refreshInputs;
-        refreshInputs();
-        ui.connection.classList.add('online');
-        ui.connectionText.textContent = 'MIDI connected';
-        ui.midiInput.disabled = false;
-        ui.armButton.textContent = 'Arm on first note';
-        ui.hint.textContent = 'Match BPM, meter, and intro bars with the jam command, then arm both.';
-      } catch (error) {
-        ui.hint.textContent = `MIDI permission failed: ${error.message}`;
-      }
-    }
-
-    function refreshInputs() {
-      if (!midi) return;
-      const inputs = [...midi.inputs.values()];
-      const previous = ui.midiInput.value;
-      ui.midiInput.replaceChildren(...inputs.map(input => {
-        const option = document.createElement('option');
-        option.value = input.id;
-        option.textContent = input.name || 'Unnamed MIDI input';
-        return option;
-      }));
-      if (!inputs.length) {
-        const option = document.createElement('option');
-        option.textContent = 'No MIDI inputs found';
-        ui.midiInput.append(option);
-        ui.midiInput.disabled = true;
-        activeInput = null;
-        return;
-      }
-      ui.midiInput.value = inputs.some(input => input.id === previous) ? previous : inputs[0].id;
-      selectInput();
-    }
-
-    function selectInput() {
-      if (activeInput) activeInput.onmidimessage = null;
-      activeInput = midi?.inputs.get(ui.midiInput.value) ?? null;
-      if (activeInput) activeInput.onmidimessage = handleMIDI;
-    }
-
-    function handleMIDI(event) {
-      const [status, note, velocity] = event.data;
-      const type = status & 0xf0;
-      const isNoteOn = type === 0x90 && velocity > 0;
-      if (!isNoteOn) return;
-      const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-      ui.noteReadout.textContent = `NOTE ${names[note % 12]}${Math.floor(note / 12) - 1}`;
-      if (armed && !running) startClock(event.timeStamp);
-    }
-
-    function arm() {
-      if (!midi) {
-        connectMIDI();
-        return;
-      }
-      persist();
-      resetClock(false);
-      armed = true;
-      ui.armButton.classList.add('armed');
-      ui.armButton.textContent = 'Armed · play one note';
-      ui.phase.textContent = 'Waiting for first note';
-      ui.caption.textContent = 'The next Note On becomes bar 1, beat 1 — exactly like jev-bassist jam.';
-      ui.hint.textContent = 'Play the first note on the downbeat. The clock will start immediately.';
-    }
-
-    function startClock(timestamp) {
-      startTime = timestamp;
-      armed = false;
-      running = true;
+    function applyState(next) {
+      state = next;
+      ui.connection.classList.add('online');
+      ui.connectionText.textContent = 'Swift connected';
+      ui.midiInput.value = `${next.source} → ${next.destination}`;
+      ui.bpm.value = next.tempoBPM;
+      ui.beats.value = next.beatsPerBar;
+      ui.intro.value = next.introBars;
+      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · bass after ${next.introBars} bars`;
+      ui.noteReadout.textContent = `CHORD ${next.chord ?? '—'} · NOTE ${next.lastNote ?? '—'}`;
+      ui.armButton.disabled = next.running || next.phase === 'stopped';
+      ui.resetButton.disabled = next.phase === 'stopped';
+      ui.armButton.textContent = next.running ? 'Running' : 'Start';
+      rebuildBeats(next.beatsPerBar);
       renderedBeat = -1;
-      ui.armButton.classList.remove('armed');
-      ui.armButton.textContent = 'Clock running';
-      render(timestamp);
+
+      if (!next.running) {
+        cancelAnimationFrame(animationFrame);
+        ui.barNumber.textContent = '—';
+        ui.beatNumber.textContent = '—';
+        ui.pulseWrap.style.setProperty('--pulse', 0);
+        ui.phase.textContent = next.phase === 'stopped' ? 'Session stopped' : 'Ready';
+        ui.caption.textContent = next.phase === 'stopped'
+          ? 'The Swift session has stopped safely.'
+          : 'Press Start on the downbeat. Swift will start MIDI scheduling and this display together.';
+        return;
+      }
+      cancelAnimationFrame(animationFrame);
+      render();
     }
 
-    function render(now) {
-      if (!running) return;
-      const value = settings();
-      const beatMs = 60000 / value.bpm;
-      const elapsed = Math.max(0, now - startTime);
+    function render() {
+      if (!state?.running || state.startedAtUnixMilliseconds == null) return;
+      const beatMs = 60000 / state.tempoBPM;
+      const elapsed = Math.max(0, Date.now() - state.startedAtUnixMilliseconds);
       const absoluteBeat = Math.floor(elapsed / beatMs);
       const beatProgress = (elapsed % beatMs) / beatMs;
-      const beat = absoluteBeat % value.beats + 1;
-      const bar = Math.floor(absoluteBeat / value.beats) + 1;
-      const introRemaining = Math.max(0, value.intro - bar + 1);
+      const beat = absoluteBeat % state.beatsPerBar + 1;
+      const bar = Math.floor(absoluteBeat / state.beatsPerBar) + 1;
+      const introRemaining = Math.max(0, state.introBars - bar + 1);
 
       ui.pulseWrap.style.setProperty('--pulse', beatProgress);
       if (absoluteBeat !== renderedBeat) {
@@ -543,37 +450,36 @@
         });
         if (introRemaining > 0) {
           ui.phase.textContent = `Intro · bass in ${introRemaining} ${introRemaining === 1 ? 'bar' : 'bars'}`;
-          ui.caption.textContent = `You lead. Jev is listening to bar ${bar} and preparing its bounded response.`;
+          ui.caption.textContent = `Swift position: bar ${bar}, beat ${beat}. Play while Jev listens and prepares.`;
         } else {
-          ui.phase.textContent = 'Live · Jev + you';
-          ui.caption.textContent = `Shared position: bar ${bar}, beat ${beat}. Keep playing; the visual clock does not alter MIDI timing.`;
+          const source = state.decisionSource ? ` · ${state.decisionSource}` : '';
+          ui.phase.textContent = `Live · ${state.brain}${source}`;
+          ui.caption.textContent = `Authoritative Swift position: bar ${bar}, beat ${beat}.`;
         }
       }
       animationFrame = requestAnimationFrame(render);
     }
 
-    function resetClock(showMessage = true) {
-      cancelAnimationFrame(animationFrame);
-      armed = false;
-      running = false;
-      renderedBeat = -1;
-      ui.barNumber.textContent = '—';
-      ui.beatNumber.textContent = '—';
-      ui.pulseWrap.style.setProperty('--pulse', 0);
-      [...ui.beatStrip.children].forEach(cell => cell.classList.remove('active'));
-      ui.armButton.classList.remove('armed');
-      ui.armButton.textContent = midi ? 'Arm on first note' : 'Connect MIDI';
-      ui.phase.textContent = 'Waiting for clock';
-      if (showMessage) {
-        ui.caption.textContent = 'Clock reset. Arm again; the next Note On becomes bar 1, beat 1.';
+    async function command(name) {
+      try {
+        const response = await fetch(`/api/${name}`, {method: 'POST'});
+        if (!response.ok) throw new Error(`${response.status}`);
+      } catch (error) {
+        ui.hint.textContent = `Command failed: ${error.message}`;
       }
     }
 
-    ui.armButton.addEventListener('click', arm);
-    ui.resetButton.addEventListener('click', () => resetClock());
-    ui.midiInput.addEventListener('change', selectInput);
-    [ui.bpm, ui.beats, ui.intro].forEach(input => input.addEventListener('change', persist));
-    restore();
+    ui.armButton.addEventListener('click', () => command('start'));
+    ui.resetButton.addEventListener('click', () => command('stop'));
+
+    const events = new EventSource('/events');
+    events.onmessage = event => applyState(JSON.parse(event.data));
+    events.onerror = () => {
+      ui.connection.classList.remove('online');
+      ui.connectionText.textContent = 'Swift disconnected';
+      ui.armButton.disabled = true;
+      ui.resetButton.disabled = true;
+    };
   </script>
 </body>
 </html>

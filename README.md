@@ -28,7 +28,7 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
 - flush pending output and silence the selected channel when a live session stops.
 
-The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion can show the bar, beat, and intro countdown without entering the MIDI output path.
+The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion reads the authoritative Swift clock and can start or stop the same live session without entering the MIDI output path.
 
 ## Requirements
 
@@ -108,17 +108,7 @@ All phrase notes are scheduled locally. The live loop waits 8 ms for near-bounda
 
 ## Open the shared beat display
 
-The browser companion listens to the same CoreMIDI source through Chrome's Web MIDI support. Its first Note On starts bar 1 beat 1, matching the Swift session clock. It never sends MIDI and never receives the TypeSafe API key.
-
-In one Terminal window, start the local page:
-
-```bash
-./run-gui.command
-```
-
-Chrome opens `http://127.0.0.1:8765`. Click **Connect MIDI**, choose `Steinberg UR22mkII`, and set the same BPM, beats per bar, and intro bars used by `jam`. Click **Arm on first note**.
-
-In a second Terminal window, start `jam` as usual. The next Note On starts both clocks:
+Add `--ui` to `jam`:
 
 ```bash
 swift run jev-bassist jam \
@@ -128,10 +118,13 @@ swift run jev-bassist jam \
   --input-channel 1 \
   --output-channel 3 \
   --intro-bars 4 \
-  --brain jev
+  --brain jev \
+  --ui
 ```
 
-The page uses `requestAnimationFrame` against the original MIDI timestamp instead of incrementing a browser timer, so visual rendering jitter does not accumulate into clock drift. Stop the Swift session and the GUI server separately with `Return` and `Control-C`.
+The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Click **Start** on the downbeat. That single action starts the Swift/CoreMIDI bar clock and the browser display together; the browser does not open MIDI itself and does not run a second independent clock. **Stop** ends the live process safely. You can also press `Return` in Terminal.
+
+Swift sends state changes with server-sent events. Between updates the page renders progress from Swift's original wall-clock start time, so animation jitter does not accumulate into musical clock drift. The TypeSafe API key remains in the Swift process and is never sent to the page.
 
 ## Switch the bassist brain to Jev
 
