@@ -1,5 +1,10 @@
 import Foundation
 
+public enum AccompanimentStyle: String, Codable, CaseIterable, Equatable, Sendable {
+    case bass
+    case ambient
+}
+
 public enum BassActivity: String, Codable, CaseIterable, Sendable {
     case rest
     case sparse
@@ -48,6 +53,7 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
     public let state: MusicalState
     public let chord: ChordCandidate?
     public let nextChord: ChordCandidate?
+    public let style: AccompanimentStyle
     public let isHeldChord: Bool
     public let targetBarIndex: Int
 
@@ -55,14 +61,35 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         state: MusicalState,
         chord: ChordCandidate?,
         nextChord: ChordCandidate? = nil,
+        style: AccompanimentStyle = .bass,
         isHeldChord: Bool,
         targetBarIndex: Int
     ) {
         self.state = state
         self.chord = chord
         self.nextChord = nextChord
+        self.style = style
         self.isHeldChord = isHeldChord
         self.targetBarIndex = targetBarIndex
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case state
+        case chord
+        case nextChord
+        case style
+        case isHeldChord
+        case targetBarIndex
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decode(MusicalState.self, forKey: .state)
+        chord = try container.decodeIfPresent(ChordCandidate.self, forKey: .chord)
+        nextChord = try container.decodeIfPresent(ChordCandidate.self, forKey: .nextChord)
+        style = try container.decodeIfPresent(AccompanimentStyle.self, forKey: .style) ?? .bass
+        isHeldChord = try container.decode(Bool.self, forKey: .isHeldChord)
+        targetBarIndex = try container.decode(Int.self, forKey: .targetBarIndex)
     }
 }
 
@@ -331,7 +358,10 @@ public struct BassPhraseGenerator: Sendable {
             if $0.offsetMicroseconds != $1.offsetMicroseconds {
                 return $0.offsetMicroseconds < $1.offsetMicroseconds
             }
-            return $0.kind.sortOrder < $1.kind.sortOrder
+            if $0.kind.sortOrder != $1.kind.sortOrder {
+                return $0.kind.sortOrder < $1.kind.sortOrder
+            }
+            return $0.note < $1.note
         }
         return BassPhrase(
             barIndex: barIndex,
@@ -521,6 +551,176 @@ public struct BassPhraseGenerator: Sendable {
     }
 }
 
+/// Renders Jev's bounded decision as a slow pad-like response. Activity changes
+/// voicing width rather than attack rate, so even a busy decision stays airy.
+public struct AmbientPhraseGenerator: Sendable {
+    public let outputChannel: UInt8
+
+    public init(outputChannel: UInt8) {
+        precondition((1...16).contains(outputChannel))
+        self.outputChannel = outputChannel
+    }
+
+    public func generate(
+        decision: BassDecision,
+        chord: ChordCandidate?,
+        barIndex: Int,
+        startMicroseconds: UInt64,
+        musicalStateConfiguration: MusicalStateConfiguration,
+        previousNotes: [UInt8],
+        humanAverageVelocity: Double?
+    ) -> BassPhrase {
+        let barLength = musicalStateConfiguration.boundaryMicroseconds(
+            afterBeats: musicalStateConfiguration.beatsPerBar
+        )
+        let endMicroseconds = startMicroseconds + barLength
+        guard decision.activity != .rest, let chord else {
+            return BassPhrase(
+                barIndex: barIndex,
+                startMicroseconds: startMicroseconds,
+                endMicroseconds: endMicroseconds,
+                messages: []
+            )
+        }
+
+        let beatLength = 60_000_000 / musicalStateConfiguration.tempoBPM
+        let onsetBeats: Double
+        switch decision.relationship {
+        case .hold:
+            onsetBeats = 0
+        case .follow:
+            onsetBeats = barIndex.isMultiple(of: 2) ? 0.25 : 0.5
+        case .contrast:
+            onsetBeats = min(1, Double(musicalStateConfiguration.beatsPerBar) / 2)
+        }
+        let releaseGapBeats = decision.fill ? 0.5 : 0.1
+        let onset = startMicroseconds + UInt64((beatLength * onsetBeats).rounded())
+        let lastUsableBeat = max(0.1, Double(musicalStateConfiguration.beatsPerBar) - 0.05)
+        let releaseBeat = min(
+            lastUsableBeat,
+            max(onsetBeats + 0.1, Double(musicalStateConfiguration.beatsPerBar) - releaseGapBeats)
+        )
+        let release = startMicroseconds + UInt64((beatLength * releaseBeat).rounded())
+        let notes = voicing(
+            decision: decision,
+            chord: chord,
+            previousNotes: previousNotes
+        )
+        var messages: [ScheduledMIDIMessage] = []
+        for (voiceIndex, note) in notes.enumerated() {
+            messages.append(
+                ScheduledMIDIMessage(
+                    offsetMicroseconds: onset,
+                    kind: .noteOn,
+                    channel: outputChannel,
+                    note: note,
+                    velocity: velocity(
+                        activity: decision.activity,
+                        voiceIndex: voiceIndex,
+                        humanAverageVelocity: humanAverageVelocity
+                    )
+                )
+            )
+            messages.append(
+                ScheduledMIDIMessage(
+                    offsetMicroseconds: min(release, endMicroseconds - 1),
+                    kind: .noteOff,
+                    channel: outputChannel,
+                    note: note,
+                    velocity: 0
+                )
+            )
+        }
+        messages.sort {
+            if $0.offsetMicroseconds != $1.offsetMicroseconds {
+                return $0.offsetMicroseconds < $1.offsetMicroseconds
+            }
+            if $0.kind.sortOrder != $1.kind.sortOrder {
+                return $0.kind.sortOrder < $1.kind.sortOrder
+            }
+            return $0.note < $1.note
+        }
+        return BassPhrase(
+            barIndex: barIndex,
+            startMicroseconds: startMicroseconds,
+            endMicroseconds: endMicroseconds,
+            messages: messages
+        )
+    }
+
+    private func voicing(
+        decision: BassDecision,
+        chord: ChordCandidate,
+        previousNotes: [UInt8]
+    ) -> [UInt8] {
+        let voiceCount: Int
+        switch decision.activity {
+        case .rest:
+            return []
+        case .sparse:
+            voiceCount = 1
+        case .normal:
+            voiceCount = 2
+        case .busy:
+            voiceCount = 3
+        }
+
+        let third = chord.quality == .major ? 4 : 3
+        let fifth = chord.quality == .diminished ? 6 : 7
+        let intervals: [Int]
+        switch decision.motion {
+        case .root:
+            intervals = [0, fifth, third]
+        case .step:
+            intervals = [third, fifth, 0]
+        case .approach:
+            intervals = [fifth, third, 0]
+        case .leap:
+            intervals = [0, third, fifth]
+        }
+
+        let anchors = [52, 60, 67]
+        return Array(intervals.prefix(voiceCount)).enumerated().map { index, interval in
+            let pitchClass = (Int(chord.rootPitchClass) + interval) % 12
+            let reference = index < previousNotes.count
+                ? Int(previousNotes[index])
+                : anchors[index]
+            return UInt8(nearestNote(pitchClass: pitchClass, to: reference))
+        }.sorted()
+    }
+
+    private func nearestNote(pitchClass: Int, to reference: Int) -> Int {
+        let candidates = (48...72).filter { $0 % 12 == pitchClass }
+        return candidates.min {
+            let left = abs($0 - reference)
+            let right = abs($1 - reference)
+            return left == right ? $0 < $1 : left < right
+        } ?? 60
+    }
+
+    private func velocity(
+        activity: BassActivity,
+        voiceIndex: Int,
+        humanAverageVelocity: Double?
+    ) -> UInt8 {
+        let defaultVelocity: Double
+        switch activity {
+        case .rest:
+            defaultVelocity = 0
+        case .sparse:
+            defaultVelocity = 44
+        case .normal:
+            defaultVelocity = 40
+        case .busy:
+            defaultVelocity = 36
+        }
+        let followed = humanAverageVelocity.map {
+            min(52, max(30, $0 * 0.25 + 18))
+        } ?? defaultVelocity
+        return UInt8(min(56, max(1, followed - Double(voiceIndex * 3))).rounded())
+    }
+}
+
 public struct BassBarPlan: Codable, Equatable, Sendable {
     public let sourceBarIndex: Int
     public let targetBarIndex: Int
@@ -582,13 +782,15 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
     public let maximumHeldChordBars: Int
     public let outputChannel: UInt8
     public let progression: [ChordCandidate]
+    public let style: AccompanimentStyle
 
     public init(
         musicalState: MusicalStateConfiguration,
         introBars: Int = 4,
         maximumHeldChordBars: Int = 2,
         outputChannel: UInt8 = 3,
-        progression: [ChordCandidate] = []
+        progression: [ChordCandidate] = [],
+        style: AccompanimentStyle = .bass
     ) throws {
         guard (0...32).contains(introBars) else {
             throw LocalBassistError.invalidIntroBars(introBars)
@@ -604,6 +806,7 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
         self.maximumHeldChordBars = maximumHeldChordBars
         self.outputChannel = outputChannel
         self.progression = progression
+        self.style = style
     }
 }
 
@@ -613,9 +816,11 @@ public struct LocalBassistEngine: Sendable {
     private var tracker: MusicalStateTracker
     private let decisionProvider: any BassDecisionProvider
     private let phraseGenerator: BassPhraseGenerator
+    private let ambientPhraseGenerator: AmbientPhraseGenerator
     private var lastChord: ChordCandidate?
     private var barsWithoutChord = 0
     private var previousBassNote: UInt8?
+    private var previousPhraseNotes: [UInt8] = []
 
     public init(
         configuration: LocalBassistConfiguration,
@@ -625,6 +830,9 @@ public struct LocalBassistEngine: Sendable {
         tracker = MusicalStateTracker(configuration: configuration.musicalState)
         self.decisionProvider = decisionProvider
         phraseGenerator = BassPhraseGenerator(outputChannel: configuration.outputChannel)
+        ambientPhraseGenerator = AmbientPhraseGenerator(
+            outputChannel: configuration.outputChannel
+        )
     }
 
     public mutating func ingest(_ event: SessionMIDIEvent) throws -> LocalBassistUpdate {
@@ -667,20 +875,41 @@ public struct LocalBassistEngine: Sendable {
                     state: snapshot.state,
                     chord: resolvedChord,
                     nextChord: progressionChord(for: targetBarIndex + 1),
+                    style: configuration.style,
                     isHeldChord: usedHeldChord,
                     targetBarIndex: targetBarIndex
                 )
                 let resolution = decisionProvider.resolution(for: input)
-                let phrase = phraseGenerator.generate(
-                    decision: resolution.decision,
-                    chord: resolvedChord,
-                    barIndex: targetBarIndex,
-                    startMicroseconds: snapshot.endMicroseconds,
-                    musicalStateConfiguration: configuration.musicalState,
-                    previousBassNote: previousBassNote,
-                    humanAverageVelocity: snapshot.state.averageVelocity,
-                    nextChord: progressionChord(for: targetBarIndex + 1)
-                )
+                let phrase: BassPhrase
+                switch configuration.style {
+                case .bass:
+                    phrase = phraseGenerator.generate(
+                        decision: resolution.decision,
+                        chord: resolvedChord,
+                        barIndex: targetBarIndex,
+                        startMicroseconds: snapshot.endMicroseconds,
+                        musicalStateConfiguration: configuration.musicalState,
+                        previousBassNote: previousBassNote,
+                        humanAverageVelocity: snapshot.state.averageVelocity,
+                        nextChord: progressionChord(for: targetBarIndex + 1)
+                    )
+                case .ambient:
+                    phrase = ambientPhraseGenerator.generate(
+                        decision: resolution.decision,
+                        chord: resolvedChord,
+                        barIndex: targetBarIndex,
+                        startMicroseconds: snapshot.endMicroseconds,
+                        musicalStateConfiguration: configuration.musicalState,
+                        previousNotes: previousPhraseNotes,
+                        humanAverageVelocity: snapshot.state.averageVelocity
+                    )
+                }
+                let generatedNotes = phrase.messages
+                    .filter { $0.kind == .noteOn }
+                    .map(\.note)
+                if !generatedNotes.isEmpty {
+                    previousPhraseNotes = generatedNotes
+                }
                 previousBassNote = phrase.messages.last(where: { $0.kind == .noteOn })?.note
                     ?? previousBassNote
                 plans.append(
@@ -705,6 +934,7 @@ public struct LocalBassistEngine: Sendable {
                         state: snapshot.state,
                         chord: preparedChord,
                         nextChord: progressionChord(for: preparedTargetBarIndex + 1),
+                        style: configuration.style,
                         isHeldChord: preparedPlannedChord == nil
                             && currentChord == nil
                             && preparedChord != nil,

@@ -45,6 +45,25 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(decision.confidence, 1)
     }
 
+    func testLegacyDecisionInputDefaultsToBassStyle() throws {
+        let input = BassDecisionInput(
+            state: state(noteCount: 1, density: 0.25),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            isHeldChord: false,
+            targetBarIndex: 4
+        )
+        let encoded = try JSONEncoder().encode(input)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "style")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(BassDecisionInput.self, from: legacyData)
+
+        XCTAssertEqual(decoded.style, .bass)
+    }
+
     func testPhraseGeneratorProducesDeterministicPairedNotesInBassRange() throws {
         let generator = BassPhraseGenerator(outputChannel: 3)
         let decision = BassDecision(
@@ -199,6 +218,94 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(towardF.messages.filter { $0.kind == .noteOn }.last?.note, 40)
     }
 
+    func testAmbientGeneratorMakesOneDelayedSustainedDyad() throws {
+        let phrase = AmbientPhraseGenerator(outputChannel: 2).generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .contrast,
+                motion: .step,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            previousNotes: [],
+            humanAverageVelocity: 80
+        )
+
+        let noteOns = phrase.messages.filter { $0.kind == .noteOn }
+        let noteOffs = phrase.messages.filter { $0.kind == .noteOff }
+        XCTAssertEqual(noteOns.map(\.note), [52, 55])
+        XCTAssertEqual(noteOns.map(\.offsetMicroseconds), [500_000, 500_000])
+        XCTAssertEqual(noteOns.map(\.velocity), [38, 35])
+        XCTAssertEqual(noteOffs.map(\.offsetMicroseconds), [1_950_000, 1_950_000])
+        XCTAssertTrue(noteOns.allSatisfy { $0.channel == 2 })
+    }
+
+    func testAmbientActivityChangesWidthWithoutAddingAttacks() throws {
+        let generator = AmbientPhraseGenerator(outputChannel: 2)
+        let chord = ChordCandidate(rootPitchClass: 2, quality: .minor, confidence: 1)
+        let configuration = try MusicalStateConfiguration(tempoBPM: 90, beatsPerBar: 4)
+
+        for (activity, expectedVoiceCount) in [
+            (BassActivity.rest, 0),
+            (.sparse, 1),
+            (.normal, 2),
+            (.busy, 3)
+        ] {
+            let phrase = generator.generate(
+                decision: BassDecision(
+                    activity: activity,
+                    relationship: .follow,
+                    motion: .root,
+                    fill: false,
+                    confidence: 1
+                ),
+                chord: chord,
+                barIndex: 4,
+                startMicroseconds: 0,
+                musicalStateConfiguration: configuration,
+                previousNotes: [],
+                humanAverageVelocity: nil
+            )
+            let noteOns = phrase.messages.filter { $0.kind == .noteOn }
+
+            XCTAssertEqual(noteOns.count, expectedVoiceCount)
+            XCTAssertLessThanOrEqual(Set(noteOns.map(\.offsetMicroseconds)).count, 1)
+        }
+    }
+
+    func testAmbientGeneratorVoiceLeadsWithoutAnOctaveJump() throws {
+        let phrase = AmbientPhraseGenerator(outputChannel: 2).generate(
+            decision: BassDecision(
+                activity: .busy,
+                relationship: .hold,
+                motion: .leap,
+                fill: true,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            barIndex: 5,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(),
+            previousNotes: [59, 66, 71],
+            humanAverageVelocity: nil
+        )
+
+        XCTAssertEqual(
+            phrase.messages.filter { $0.kind == .noteOn }.map(\.note),
+            [60, 64, 67]
+        )
+        XCTAssertTrue(
+            phrase.messages.filter { $0.kind == .noteOn }.allSatisfy { $0.velocity <= 36 }
+        )
+    }
+
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {
         let phrase = BassPhraseGenerator(outputChannel: 3).generate(
             decision: BassDecision(
@@ -291,6 +398,34 @@ final class LocalBassistTests: XCTestCase {
             firstPlan.phrase.messages.filter { $0.kind == .noteOn }.last?.note,
             42
         )
+    }
+
+    func testEngineRoutesAmbientStyleToSustainedVoicing() throws {
+        let progression = try ChordProgressionParser.parse("Cmaj7")
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(
+                    tempoBPM: 120,
+                    beatsPerBar: 4
+                ),
+                introBars: 0,
+                outputChannel: 2,
+                progression: progression,
+                style: .ambient
+            )
+        )
+
+        let plan = try XCTUnwrap(
+            engine.advance(through: 2_000_000).plans.first
+        )
+        let noteOns = plan.phrase.messages.filter { $0.kind == .noteOn }
+        let noteOffs = plan.phrase.messages.filter { $0.kind == .noteOff }
+
+        XCTAssertEqual(plan.targetBarIndex, 1)
+        XCTAssertEqual(noteOns.map(\.note), [52, 55])
+        XCTAssertEqual(noteOns.map(\.offsetMicroseconds), [2_000_000, 2_000_000])
+        XCTAssertEqual(noteOffs.map(\.offsetMicroseconds), [3_950_000, 3_950_000])
+        XCTAssertTrue(plan.phrase.messages.allSatisfy { $0.channel == 2 })
     }
 
     func testEngineHoldsChordForTwoSilentBarsThenFallsBackToRest() throws {

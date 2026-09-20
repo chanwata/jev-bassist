@@ -317,7 +317,7 @@
 <body>
   <div class="shell">
     <header>
-      <div class="brand">JEV/BASSIST <span>shared clock</span></div>
+      <div class="brand">JEV/ENSEMBLE <span>shared clock</span></div>
       <div class="connection" id="connection"><i class="dot"></i><span id="connectionText">Connecting to Swift</span></div>
     </header>
 
@@ -407,7 +407,7 @@
       ui.bpm.value = next.tempoBPM;
       ui.beats.value = next.beatsPerBar;
       ui.intro.value = next.introBars;
-      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · bass after ${next.introBars} bars`;
+      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style} after ${next.introBars} bars`;
       const harmony = next.nextChord
         ? `${next.chord ?? '—'} → ${next.nextChord}`
         : (next.chord ?? '—');
@@ -452,7 +452,7 @@
           cell.classList.toggle('active', index + 1 === beat);
         });
         if (introRemaining > 0) {
-          ui.phase.textContent = `Intro · bass in ${introRemaining} ${introRemaining === 1 ? 'bar' : 'bars'}`;
+          ui.phase.textContent = `Intro · ${state.style} in ${introRemaining} ${introRemaining === 1 ? 'bar' : 'bars'}`;
           const listener = state.brain === 'jev' ? 'Jev' : 'The local rule engine';
           ui.caption.textContent = `Swift position: bar ${bar}, beat ${beat}. Play while ${listener} listens and prepares.`;
         } else {

@@ -32,6 +32,7 @@ public struct JevChordState: Codable, Equatable, Sendable {
 /// The compact, serializable state sent to Jev. It contains musical facts,
 /// never raw MIDI bytes or credentials.
 public struct JevBassState: Codable, Equatable, Sendable {
+    public let accompanimentStyle: String
     public let targetBarIndex: Int
     public let phrasePosition: Int
     public let noteOnCount: Int
@@ -48,6 +49,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
     public let isHeldChord: Bool
 
     public init(input: BassDecisionInput) {
+        accompanimentStyle = input.style.rawValue
         targetBarIndex = input.targetBarIndex
         phrasePosition = input.targetBarIndex % 4
         noteOnCount = input.state.noteOnCount
@@ -83,6 +85,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case accompanimentStyle = "accompaniment_style"
         case targetBarIndex = "target_bar_index"
         case phrasePosition = "phrase_position_in_four_bar_cycle"
         case noteOnCount = "note_on_count"
@@ -181,6 +184,51 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
         )
     )
 
+    public static let ambient = JevBassQuestions(
+        activity: JevChoiceQuestion(
+            instructions: "Choose the width of one soft sustained ambient response in the target bar. Never use activity to request more attacks. Prefer less sound when the human is dense.",
+            criteria: [
+                "rest": "Silence is the most attentive response, especially when harmony is uncertain.",
+                "sparse": "Use one quiet anchor note and leave almost all harmonic space to the player.",
+                "normal": "Use one quiet two-note voicing that supports the player without defining every chord tone.",
+                "busy": "Use one soft three-note voicing only when the human clearly leaves space; this still means one onset."
+            ]
+        ),
+        relationship: JevChoiceQuestion(
+            instructions: "Choose when the single sustained ambient response should enter relative to the player.",
+            criteria: [
+                "follow": "Enter slightly behind the downbeat so the response feels like listening and joining.",
+                "contrast": "Leave the downbeat open and answer later in the bar when the player is active.",
+                "hold": "Enter on the boundary and sustain a stable layer when the player pauses or evidence is limited."
+            ]
+        ),
+        motion: JevChoiceQuestion(
+            instructions: "Choose a bounded inversion character. The local engine will select chord tones and voice-lead them from the preceding voicing.",
+            criteria: [
+                "root": "Use a grounded root-position shape.",
+                "step": "Use a close, gently inverted shape.",
+                "approach": "Use a higher inversion that suggests forward motion without a chromatic attack.",
+                "leap": "Use the widest stable root, third, and fifth shape."
+            ]
+        ),
+        fill: JevNoulQuestion(
+            instructions: "Should the sustained response release early to leave a breath before the following bar? This never adds another attack.",
+            criteria: JevNoulCriteria(
+                trueDescription: "Release early because the phrase is closing or the player needs a clear pocket of silence.",
+                falseDescription: "Sustain nearly to the boundary because continuity will listen better."
+            )
+        )
+    )
+
+    public static func forStyle(_ style: AccompanimentStyle) -> JevBassQuestions {
+        switch style {
+        case .bass:
+            return .standard
+        case .ambient:
+            return .ambient
+        }
+    }
+
     public init(
         activity: JevChoiceQuestion,
         relationship: JevChoiceQuestion,
@@ -202,11 +250,11 @@ public struct JevSystemOneRequest: Codable, Equatable, Sendable {
     public init(
         input: BassDecisionInput,
         model: String = "jev-latest",
-        questions: JevBassQuestions = .standard
+        questions: JevBassQuestions? = nil
     ) {
         state = JevBassState(input: input)
         self.model = model
-        self.questions = questions
+        self.questions = questions ?? .forStyle(input.style)
     }
 }
 

@@ -26,6 +26,7 @@ private struct JamOptions: Sendable {
     let brain: BrainMode
     let webUI: Bool
     let progression: [ChordCandidate]
+    let style: AccompanimentStyle
 }
 
 private enum Command {
@@ -145,7 +146,7 @@ private enum Command {
             allowed: [
                 "--source", "--destination", "--bpm", "--beats-per-bar",
                 "--input-channel", "--output-channel", "--intro-bars", "--brain",
-                "--progression"
+                "--progression", "--style"
             ],
             usage: "jam --source NAME --destination NAME [options]"
         )
@@ -164,6 +165,10 @@ private enum Command {
         guard let brain = BrainMode(rawValue: brainName) else {
             throw CLIError.invalidArguments("--brain must be 'rules' or 'jev'.")
         }
+        let styleName = options["--style"] ?? AccompanimentStyle.bass.rawValue
+        guard let style = AccompanimentStyle(rawValue: styleName) else {
+            throw CLIError.invalidArguments("--style must be 'bass' or 'ambient'.")
+        }
         let progression: [ChordCandidate]
         if let progressionText = options["--progression"] {
             progression = try ChordProgressionParser.parse(progressionText)
@@ -178,7 +183,8 @@ private enum Command {
             musicalState: musicalState,
             introBars: introBars,
             outputChannel: outputChannel,
-            progression: progression
+            progression: progression,
+            style: style
         )
         return JamOptions(
             source: source,
@@ -190,7 +196,8 @@ private enum Command {
             introBars: introBars,
             brain: brain,
             webUI: webUICount == 1,
-            progression: progression
+            progression: progression,
+            style: style
         )
     }
 
@@ -286,7 +293,7 @@ USAGE
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N] [--brain rules|jev] [--progression CHORDS] [--ui]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N] [--brain rules|jev] [--style bass|ambient] [--progression CHORDS] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -296,7 +303,7 @@ COMMANDS
   capture      Record a versioned JSON fixture. Press Return to stop and save.
   replay       Replay into the analyzer and print state. No MIDI output is sent.
   soundcheck   Send three short bass notes to one destination, then silence it.
-  jam          Listen locally and schedule bass after the intro. Add --ui for the shared clock.
+  jam          Listen locally and schedule bass or ambient accompaniment after the intro.
 """
 
 private func printSources(_ sources: [MIDISource]) {
@@ -357,14 +364,14 @@ private func format(_ snapshot: MusicalStateSnapshot) -> String {
     return "\(snapshot.boundary.rawValue) \(location) notes=\(state.noteOnCount) density=\(String(format: "%.2f", state.noteDensityPerBeat)) velocity=\(velocity) register=\(register) held=\(held) pulse=\(pulse) chords=\(chords)"
 }
 
-private func format(_ plan: BassBarPlan) -> String {
+private func format(_ plan: BassBarPlan, style: AccompanimentStyle) -> String {
     let chord = plan.chord.map(\.displayName) ?? "none"
     let held = plan.usedHeldChord ? " held" : ""
     let notes = plan.phrase.messages
         .filter { $0.kind == .noteOn }
         .map { MIDINoteName.name(for: $0.note) }
         .joined(separator: ",")
-    return "bass bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
+    return "\(style.rawValue) bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
 }
 
 private let jevTraceLock = NSLock()
@@ -541,7 +548,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 musicalState: musicalState,
                 introBars: options.introBars,
                 outputChannel: options.outputChannel,
-                progression: options.progression
+                progression: options.progression,
+                style: options.style
             ),
             decisionProvider: decisionProvider
         )
@@ -646,7 +654,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         lastPublishedBeat = nil
         startTimer()
         publishState(elapsedMicroseconds: 0)
-        print("Clock started by \(trigger); bass enters after \(options.introBars) complete bars.")
+        print("Clock started by \(trigger); \(options.style.rawValue) accompaniment enters after \(options.introBars) complete bars.")
     }
 
     private func startTimer() {
@@ -701,7 +709,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             to: anchorHostTime
         )
         for plan in update.plans {
-            print(format(plan))
+            print(format(plan, style: options.style))
             lastChord = plan.chord?.displayName
             lastDecisionSource = plan.decisionSource.rawValue
             try output.schedule(
@@ -731,6 +739,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 beatsPerBar: options.beatsPerBar,
                 introBars: options.introBars,
                 brain: options.brain.rawValue,
+                style: options.style.rawValue,
                 source: options.source,
                 destination: options.destination,
                 startedAtUnixMilliseconds: startedAt.map { $0.timeIntervalSince1970 * 1_000 },
@@ -793,7 +802,8 @@ private func runJam(_ options: JamOptions) throws {
     let connectedSources = try monitor.connect(sourceMatching: options.source)
 
     print("Listening to \(connectedSources.map(\.name).joined(separator: ", ")) on channel \(options.inputChannel).")
-    print("Bass output: \(destination.name), channel \(options.outputChannel), \(options.tempoBPM) BPM, \(options.beatsPerBar)/4.")
+    print("Output: \(destination.name), channel \(options.outputChannel), \(options.tempoBPM) BPM, \(options.beatsPerBar)/4.")
+    print("Style: \(options.style.rawValue).")
     print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
     if !options.progression.isEmpty {
         print("Harmony: \(options.progression.map(\.displayName).joined(separator: " → ")) (loops after the intro).")

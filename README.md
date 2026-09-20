@@ -26,6 +26,7 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - prefetch Jev decisions one bar ahead and fall back to the deterministic rule policy without delaying a note;
 - log the complete secret-free Jev request, response, resolved model, outcome, and latency;
 - generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
+- render the same bounded decisions as one quiet, sustained ambient voicing per bar;
 - flush pending output and silence the selected channel when a live session stops.
 
 The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion reads the authoritative Swift clock and can start or stop the same live session without entering the MIDI output path.
@@ -120,6 +121,28 @@ The M3 rule policy is intentionally conservative:
 - generated notes stay in MIDI 36–48 (C2–C3), with a paired Note Off for every Note On.
 
 All phrase notes are scheduled locally. The live loop waits 8 ms for near-boundary input and applies a fixed 12 ms output safety offset; network latency is not present in the timing path.
+
+## Use the ambient ensemble style
+
+`--style ambient` maps the same bounded Jev decisions to slow, sustained accompaniment instead of a walking or syncopated bass line. Activity changes the width of a single pad voicing—silence, one note, two notes, or three notes—rather than increasing rhythmic attack rate. Relationship controls whether the response enters on the boundary, slightly behind it, or after leaving the downbeat open. A fill becomes an earlier release that leaves air before the next chord.
+
+On a JD-Xi, select a soft pad or slowly evolving sound for Digital Synth 2 and send the companion to its usual MIDI channel 2. Keep your played part on channel 1:
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 90 \
+  --input-channel 1 \
+  --output-channel 2 \
+  --intro-bars 2 \
+  --progression "Dm7,G7,Cmaj7,Cmaj7" \
+  --style ambient \
+  --brain jev \
+  --ui
+```
+
+Ambient notes stay between MIDI 48 and 72 (C3–C5), use restrained velocity, and sustain for most of the bar. A supplied progression is strongly recommended: it gives both the local voicing engine and Jev stable current/next harmony. Start around 70–100 BPM and use a patch with a slow attack, long release, modest reverb, and no tempo-synced arpeggiator.
 
 ## Open the shared beat display
 

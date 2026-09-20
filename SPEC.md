@@ -32,6 +32,8 @@ Jev is a decision maker, not a note generator. Its future typed output should re
 
 The exact schema will be fixed only after a rule-based bassist can already complete a live session.
 
+The local renderer may interpret those axes as either a bass pocket or an ambient ensemble response. Ambient activity changes voicing width rather than attack rate; timing remains sparse and sustained, and Jev still never chooses individual notes.
+
 ## Architecture
 
 ```text
