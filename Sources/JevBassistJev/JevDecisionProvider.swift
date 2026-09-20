@@ -220,12 +220,50 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
         )
     )
 
+    public static let memory = JevBassQuestions(
+        activity: JevChoiceQuestion(
+            instructions: "Choose how much of the human's recent motif should be recalled. Prefer a small, recognizable fragment and use silence when the player has not left room.",
+            criteria: [
+                "rest": "Do not answer; let the last gesture and its resonance remain alone.",
+                "sparse": "Recall only one anchor from the motif as a quiet trace.",
+                "normal": "Recall up to three representative notes so the human can recognize the contour.",
+                "busy": "Recall up to four notes only when the human phrase was short and left a clear opening."
+            ]
+        ),
+        relationship: JevChoiceQuestion(
+            instructions: "Choose how long the local response should listen before entering. Every option leaves the downbeat open.",
+            criteria: [
+                "follow": "Answer after a short breath and retain the source phrase's relative timing.",
+                "contrast": "Wait deeper into the bar, then answer as a separated afterimage.",
+                "hold": "Enter gently after half a beat and let the recalled notes overlap."
+            ]
+        ),
+        motion: JevChoiceQuestion(
+            instructions: "Choose one deterministic transformation of the remembered contour. The local engine keeps all notes in a safe register.",
+            criteria: [
+                "root": "Transpose the contour so it begins on the supplied chord root.",
+                "step": "Compress wide intervals while keeping their direction.",
+                "approach": "Reverse the motif order to make a restrained echo.",
+                "leap": "Expand alternating intervals to produce a wider spectral reply."
+            ]
+        ),
+        fill: JevNoulQuestion(
+            instructions: "Should the recalled phrase dissolve early and leave silence before the next bar?",
+            criteria: JevNoulCriteria(
+                trueDescription: "Release early because the exchange needs a clear breath.",
+                falseDescription: "Allow the response to resonate close to the next boundary."
+            )
+        )
+    )
+
     public static func forStyle(_ style: AccompanimentStyle) -> JevBassQuestions {
         switch style {
         case .bass:
             return .standard
         case .ambient:
             return .ambient
+        case .memory:
+            return .memory
         }
     }
 

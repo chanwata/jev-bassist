@@ -306,6 +306,79 @@ final class LocalBassistTests: XCTestCase {
         )
     }
 
+    func testMemoryGeneratorReturnsRecognizableDelayedContour() throws {
+        let result = MemoryPhraseGenerator(outputChannel: 2).generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .follow,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 2, quality: .minor, confidence: 1),
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            memory: HumanPhraseMemory(
+                notes: [
+                    HumanPhraseNote(note: 60, velocity: 86, positionBeats: 0),
+                    HumanPhraseNote(note: 63, velocity: 82, positionBeats: 0.5),
+                    HumanPhraseNote(note: 67, velocity: 78, positionBeats: 1)
+                ]
+            ),
+            previousNotes: [],
+            humanAverageVelocity: 80
+        )
+
+        let noteOns = result.phrase.messages.filter { $0.kind == .noteOn }
+        XCTAssertEqual(noteOns.map(\.note), [62, 65, 69])
+        XCTAssertEqual(noteOns.map(\.offsetMicroseconds), [375_000, 875_000, 1_375_000])
+        XCTAssertTrue(noteOns.allSatisfy { $0.channel == 2 && $0.velocity <= 52 })
+        XCTAssertGreaterThan(result.expression.memory, 0.7)
+        XCTAssertGreaterThan(result.expression.resonance, 0.5)
+    }
+
+    func testMemoryGeneratorLetsOldPhraseFadeToSilence() throws {
+        let generator = MemoryPhraseGenerator(outputChannel: 2)
+        let decision = BassDecision(
+            activity: .sparse,
+            relationship: .contrast,
+            motion: .approach,
+            fill: true,
+            confidence: 1
+        )
+        let configuration = try MusicalStateConfiguration(tempoBPM: 90, beatsPerBar: 4)
+        let notes = [HumanPhraseNote(note: 64, velocity: 88, positionBeats: 1)]
+        let remembered = generator.generate(
+            decision: decision,
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            barIndex: 3,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration,
+            memory: HumanPhraseMemory(notes: notes, ageBars: 2),
+            previousNotes: [],
+            humanAverageVelocity: nil
+        )
+        let forgotten = generator.generate(
+            decision: decision,
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: configuration,
+            memory: HumanPhraseMemory(notes: notes, ageBars: 3),
+            previousNotes: [],
+            humanAverageVelocity: nil
+        )
+
+        XCTAssertEqual(remembered.phrase.messages.filter { $0.kind == .noteOn }.count, 1)
+        XCTAssertLessThan(remembered.expression.memory, 0.5)
+        XCTAssertTrue(forgotten.phrase.messages.isEmpty)
+        XCTAssertEqual(forgotten.expression, .quiet)
+    }
+
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {
         let phrase = BassPhraseGenerator(outputChannel: 3).generate(
             decision: BassDecision(
@@ -426,6 +499,46 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(noteOns.map(\.offsetMicroseconds), [2_000_000, 2_000_000])
         XCTAssertEqual(noteOffs.map(\.offsetMicroseconds), [3_950_000, 3_950_000])
         XCTAssertTrue(plan.phrase.messages.allSatisfy { $0.channel == 2 })
+    }
+
+    func testEngineRemembersHumanMotifForTwoSilentBars() throws {
+        let progression = try ChordProgressionParser.parse("Cmaj7")
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4),
+                introBars: 0,
+                outputChannel: 2,
+                progression: progression,
+                style: .memory
+            )
+        )
+        for (offset, note) in [(UInt64(0), UInt8(60)), (125_000, 64), (250_000, 67)] {
+            _ = try engine.ingest(
+                SessionMIDIEvent(
+                    offsetMicroseconds: offset,
+                    hostTime: offset,
+                    channel: 1,
+                    kind: .noteOn,
+                    note: note,
+                    velocity: 84
+                )
+            )
+        }
+
+        let fresh = try XCTUnwrap(engine.advance(through: 2_000_000).plans.first)
+        let firstEcho = try XCTUnwrap(engine.advance(through: 4_000_000).plans.first)
+        let secondEcho = try XCTUnwrap(engine.advance(through: 6_000_000).plans.first)
+        let forgotten = try XCTUnwrap(engine.advance(through: 8_000_000).plans.first)
+
+        XCTAssertEqual(
+            fresh.phrase.messages.filter { $0.kind == .noteOn }.map(\.note),
+            [60, 64, 67]
+        )
+        XCTAssertFalse(firstEcho.phrase.messages.isEmpty)
+        XCTAssertFalse(secondEcho.phrase.messages.isEmpty)
+        XCTAssertGreaterThan(fresh.expression.memory, firstEcho.expression.memory)
+        XCTAssertGreaterThan(firstEcho.expression.memory, secondEcho.expression.memory)
+        XCTAssertTrue(forgotten.phrase.messages.isEmpty)
     }
 
     func testEngineHoldsChordForTwoSilentBarsThenFallsBackToRest() throws {

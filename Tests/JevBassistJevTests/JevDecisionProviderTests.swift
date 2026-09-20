@@ -32,6 +32,17 @@ final class JevDecisionProviderTests: XCTestCase {
         )
     }
 
+    func testMemoryStyleUsesMotifRecallQuestions() throws {
+        let request = JevSystemOneRequest(
+            input: makeInput(targetBarIndex: 6, style: .memory)
+        )
+
+        XCTAssertEqual(request.state.accompanimentStyle, "memory")
+        XCTAssertTrue(request.questions.activity.instructions.contains("recent motif"))
+        XCTAssertTrue(request.questions.relationship.instructions.contains("listen"))
+        XCTAssertTrue(request.questions.motion.instructions.contains("transformation"))
+    }
+
     func testClientMapsTypedAnswersAndLogsFullSecretFreeTrace() async throws {
         let response = makeResponse()
         let transport = StubTransport(response: response)
@@ -128,7 +139,10 @@ final class JevDecisionProviderTests: XCTestCase {
         XCTAssertEqual(outcome.value, .cancelled)
     }
 
-    private func makeInput(targetBarIndex: Int) -> BassDecisionInput {
+    private func makeInput(
+        targetBarIndex: Int,
+        style: AccompanimentStyle = .ambient
+    ) -> BassDecisionInput {
         BassDecisionInput(
             state: MusicalState(
                 noteOnCount: 4,
@@ -164,7 +178,7 @@ final class JevDecisionProviderTests: XCTestCase {
                 quality: .major,
                 confidence: 1
             ),
-            style: .ambient,
+            style: style,
             isHeldChord: false,
             targetBarIndex: targetBarIndex
         )
