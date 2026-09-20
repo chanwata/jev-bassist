@@ -119,6 +119,20 @@ final class MusicalStateTrackerTests: XCTestCase {
         XCTAssertEqual(snapshots[0].state.averageNote, 60)
     }
 
+    func testLiveClockMayTemporarilyTrailLatestEvent() throws {
+        var tracker = try makeTracker()
+        _ = try tracker.ingest(event(at: 0, note: 60))
+        XCTAssertTrue(try tracker.advance(through: 450_000).isEmpty)
+        XCTAssertTrue(try tracker.ingest(event(at: 461_465, note: 64)).isEmpty)
+
+        XCTAssertTrue(try tracker.advance(through: 453_465).isEmpty)
+        let snapshots = try tracker.advance(through: 500_000)
+
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[0].state.noteOnCount, 2)
+        XCTAssertEqual(snapshots[0].state.averageNote, 62)
+    }
+
     func testRejectsOutOfOrderEventsAndIngestAfterFinish() throws {
         var tracker = try makeTracker()
         _ = try tracker.ingest(event(at: 200, note: 60))

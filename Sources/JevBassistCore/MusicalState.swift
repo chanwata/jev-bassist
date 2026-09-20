@@ -24,6 +24,7 @@ public enum MusicalStateError: Error, CustomStringConvertible, Equatable {
     case invalidTempo(Double)
     case invalidBeatsPerBar(Int)
     case nonMonotonicEvent(offsetMicroseconds: UInt64)
+    case nonMonotonicAdvance(offsetMicroseconds: UInt64)
     case eventBeforeCompletedBoundary(
         offsetMicroseconds: UInt64,
         completedThroughMicroseconds: UInt64
@@ -38,6 +39,8 @@ public enum MusicalStateError: Error, CustomStringConvertible, Equatable {
             return "Beats per bar must be between 1 and 16; received \(beats)."
         case let .nonMonotonicEvent(offset):
             return "MIDI event at \(offset) microseconds is earlier than the preceding event."
+        case let .nonMonotonicAdvance(offset):
+            return "Clock advance to \(offset) microseconds is earlier than the preceding clock advance."
         case let .eventBeforeCompletedBoundary(offset, completedThrough):
             return "MIDI event at \(offset) microseconds arrived after the window through \(completedThrough) microseconds was completed."
         case .eventAfterFinish:
@@ -256,8 +259,8 @@ public struct MusicalStateTracker: Sendable {
         guard !isFinished else {
             throw MusicalStateError.eventAfterFinish
         }
-        guard offsetMicroseconds >= latestProcessedOffset else {
-            throw MusicalStateError.nonMonotonicEvent(
+        if let lastAdvanceOffset, offsetMicroseconds < lastAdvanceOffset {
+            throw MusicalStateError.nonMonotonicAdvance(
                 offsetMicroseconds: offsetMicroseconds
             )
         }
@@ -272,8 +275,8 @@ public struct MusicalStateTracker: Sendable {
         guard !isFinished else {
             return []
         }
-        if offsetMicroseconds < latestProcessedOffset {
-            throw MusicalStateError.nonMonotonicEvent(
+        if offsetMicroseconds < latestObservedOffset {
+            throw MusicalStateError.nonMonotonicAdvance(
                 offsetMicroseconds: offsetMicroseconds
             )
         }
@@ -282,7 +285,7 @@ public struct MusicalStateTracker: Sendable {
         return advanceBoundaries(through: offsetMicroseconds)
     }
 
-    private var latestProcessedOffset: UInt64 {
+    private var latestObservedOffset: UInt64 {
         max(lastEventOffset ?? 0, lastAdvanceOffset ?? 0)
     }
 
