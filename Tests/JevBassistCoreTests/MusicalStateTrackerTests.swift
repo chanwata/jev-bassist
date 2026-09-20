@@ -84,6 +84,55 @@ final class MusicalStateTrackerTests: XCTestCase {
         XCTAssertTrue(snapshots.allSatisfy { $0.state.pulse == nil })
     }
 
+    func testAdvanceEmitsSilentWindowsWithoutFinishingAndRejectsLateEvents() throws {
+        var tracker = try makeTracker()
+
+        let firstBeat = try tracker.advance(through: 500_000)
+        let boundaryEventSnapshots = try tracker.ingest(event(at: 500_000, note: 60))
+        let secondBeat = try tracker.advance(through: 1_000_000)
+
+        XCTAssertEqual(firstBeat.count, 1)
+        XCTAssertEqual(firstBeat[0].state.noteOnCount, 0)
+        XCTAssertTrue(boundaryEventSnapshots.isEmpty)
+        XCTAssertEqual(secondBeat.count, 1)
+        XCTAssertEqual(secondBeat[0].state.noteOnCount, 1)
+        XCTAssertThrowsError(try tracker.ingest(event(at: 999_999, note: 62))) { error in
+            XCTAssertEqual(
+                error as? MusicalStateError,
+                .eventBeforeCompletedBoundary(
+                    offsetMicroseconds: 999_999,
+                    completedThroughMicroseconds: 1_000_000
+                )
+            )
+        }
+    }
+
+    func testEventMayArriveBehindLiveClockWithinOpenBeat() throws {
+        var tracker = try makeTracker()
+
+        XCTAssertTrue(try tracker.advance(through: 230_000).isEmpty)
+        XCTAssertTrue(try tracker.ingest(event(at: 221_341, note: 60)).isEmpty)
+        let snapshots = try tracker.advance(through: 500_000)
+
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[0].state.noteOnCount, 1)
+        XCTAssertEqual(snapshots[0].state.averageNote, 60)
+    }
+
+    func testLiveClockMayTemporarilyTrailLatestEvent() throws {
+        var tracker = try makeTracker()
+        _ = try tracker.ingest(event(at: 0, note: 60))
+        XCTAssertTrue(try tracker.advance(through: 450_000).isEmpty)
+        XCTAssertTrue(try tracker.ingest(event(at: 461_465, note: 64)).isEmpty)
+
+        XCTAssertTrue(try tracker.advance(through: 453_465).isEmpty)
+        let snapshots = try tracker.advance(through: 500_000)
+
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[0].state.noteOnCount, 2)
+        XCTAssertEqual(snapshots[0].state.averageNote, 62)
+    }
+
     func testRejectsOutOfOrderEventsAndIngestAfterFinish() throws {
         var tracker = try makeTracker()
         _ = try tracker.ingest(event(at: 200, note: 60))

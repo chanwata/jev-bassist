@@ -24,6 +24,11 @@ public enum MusicalStateError: Error, CustomStringConvertible, Equatable {
     case invalidTempo(Double)
     case invalidBeatsPerBar(Int)
     case nonMonotonicEvent(offsetMicroseconds: UInt64)
+    case nonMonotonicAdvance(offsetMicroseconds: UInt64)
+    case eventBeforeCompletedBoundary(
+        offsetMicroseconds: UInt64,
+        completedThroughMicroseconds: UInt64
+    )
     case eventAfterFinish
 
     public var description: String {
@@ -34,6 +39,10 @@ public enum MusicalStateError: Error, CustomStringConvertible, Equatable {
             return "Beats per bar must be between 1 and 16; received \(beats)."
         case let .nonMonotonicEvent(offset):
             return "MIDI event at \(offset) microseconds is earlier than the preceding event."
+        case let .nonMonotonicAdvance(offset):
+            return "Clock advance to \(offset) microseconds is earlier than the preceding clock advance."
+        case let .eventBeforeCompletedBoundary(offset, completedThrough):
+            return "MIDI event at \(offset) microseconds arrived after the window through \(completedThrough) microseconds was completed."
         case .eventAfterFinish:
             return "Cannot ingest events after the musical-state tracker has finished."
         }
@@ -187,6 +196,8 @@ public struct MusicalStateTracker: Sendable {
     private var pulseOnsets: [UInt64] = []
     private var heldNotes: [NoteKey: HeldNote] = [:]
     private var lastEventOffset: UInt64?
+    private var lastAdvanceOffset: UInt64?
+    private var completedThroughMicroseconds: UInt64 = 0
     private var isFinished = false
 
     public init(configuration: MusicalStateConfiguration) {
@@ -198,6 +209,12 @@ public struct MusicalStateTracker: Sendable {
     ) throws -> [MusicalStateSnapshot] {
         guard !isFinished else {
             throw MusicalStateError.eventAfterFinish
+        }
+        if event.offsetMicroseconds < completedThroughMicroseconds {
+            throw MusicalStateError.eventBeforeCompletedBoundary(
+                offsetMicroseconds: event.offsetMicroseconds,
+                completedThroughMicroseconds: completedThroughMicroseconds
+            )
         }
         if let lastEventOffset, event.offsetMicroseconds < lastEventOffset {
             throw MusicalStateError.nonMonotonicEvent(
@@ -233,19 +250,43 @@ public struct MusicalStateTracker: Sendable {
         return snapshots
     }
 
+    /// Advances the deterministic beat grid without ending the session. Live
+    /// callers use this to emit silent beat and bar snapshots when no MIDI
+    /// events arrive.
+    public mutating func advance(
+        through offsetMicroseconds: UInt64
+    ) throws -> [MusicalStateSnapshot] {
+        guard !isFinished else {
+            throw MusicalStateError.eventAfterFinish
+        }
+        if let lastAdvanceOffset, offsetMicroseconds < lastAdvanceOffset {
+            throw MusicalStateError.nonMonotonicAdvance(
+                offsetMicroseconds: offsetMicroseconds
+            )
+        }
+
+        lastAdvanceOffset = offsetMicroseconds
+        return advanceBoundaries(through: offsetMicroseconds)
+    }
+
     public mutating func finish(
         through offsetMicroseconds: UInt64
     ) throws -> [MusicalStateSnapshot] {
         guard !isFinished else {
             return []
         }
-        if let lastEventOffset, offsetMicroseconds < lastEventOffset {
-            throw MusicalStateError.nonMonotonicEvent(
+        if offsetMicroseconds < latestObservedOffset {
+            throw MusicalStateError.nonMonotonicAdvance(
                 offsetMicroseconds: offsetMicroseconds
             )
         }
         isFinished = true
+        lastAdvanceOffset = offsetMicroseconds
         return advanceBoundaries(through: offsetMicroseconds)
+    }
+
+    private var latestObservedOffset: UInt64 {
+        max(lastEventOffset ?? 0, lastAdvanceOffset ?? 0)
     }
 
     private mutating func advanceBoundaries(
@@ -300,6 +341,7 @@ public struct MusicalStateTracker: Sendable {
                 barOnsets.removeAll(keepingCapacity: true)
             }
 
+            completedThroughMicroseconds = beatEnd
             nextBeatNumber += 1
         }
 
