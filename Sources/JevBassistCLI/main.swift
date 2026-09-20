@@ -144,7 +144,7 @@ COMMANDS
   devices   List CoreMIDI input sources.
   monitor   Print Note On and Note Off events. With no source, listen to all sources.
   capture   Record a versioned JSON fixture. Press Return to stop and save.
-  replay    Replay a fixture without hardware and print beat/bar musical state.
+  replay    Replay into the analyzer and print state. No MIDI output is sent.
 """
 
 func printSources(_ sources: [MIDISource]) {
@@ -242,7 +242,7 @@ func runReplay(inputPath: String, tempoBPM: Double, beatsPerBar: Int) throws {
     )
     var tracker = MusicalStateTracker(configuration: configuration)
 
-    print("Replaying \(fixture.events.count) events from \(fixture.sourceNames.joined(separator: ", ")) at \(tempoBPM) BPM, \(beatsPerBar)/4.")
+    print("Analyzing \(fixture.events.count) recorded events from \(fixture.sourceNames.joined(separator: ", ")) at \(tempoBPM) BPM, \(beatsPerBar)/4. No MIDI output is sent.")
     for event in fixture.events {
         for snapshot in try tracker.ingest(event) {
             print(format(snapshot))
