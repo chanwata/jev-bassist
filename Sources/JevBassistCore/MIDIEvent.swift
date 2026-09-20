@@ -1,7 +1,7 @@
 import Foundation
 
 public struct MIDIEvent: Equatable, Sendable {
-    public enum Kind: String, Equatable, Sendable {
+    public enum Kind: String, Codable, Equatable, Sendable {
         case noteOn
         case noteOff
     }
