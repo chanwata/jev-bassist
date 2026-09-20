@@ -229,8 +229,7 @@ func runCapture(outputPath: String, source: String?) throws {
     monitor.flushPendingEvents()
 
     let fixture = try capture.fixture(sourceNames: sourceNames)
-    let data = try MIDISessionFixtureCodec.encode(fixture)
-    try data.write(to: outputURL, options: [.atomic, .withoutOverwriting])
+    try MIDISessionFixtureCodec.write(fixture, to: outputURL)
     print("Saved \(fixture.events.count) events to \(outputURL.path).")
 }
 
