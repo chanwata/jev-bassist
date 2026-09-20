@@ -170,6 +170,14 @@ public enum MIDISessionFixtureCodec {
         return try decoder.decode(MIDISessionFixture.self, from: data)
     }
 
+    public static func write(
+        _ fixture: MIDISessionFixture,
+        to url: URL
+    ) throws {
+        let data = try encode(fixture)
+        try data.write(to: url, options: .withoutOverwriting)
+    }
+
     private static var timestampFormatter: ISO8601DateFormatter {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
