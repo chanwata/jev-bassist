@@ -27,6 +27,8 @@ private struct JamOptions: Sendable {
     let webUI: Bool
     let progression: [ChordCandidate]
     let style: AccompanimentStyle
+    let humanVolume: UInt8
+    let companionVolume: UInt8
 }
 
 private enum Command {
@@ -146,7 +148,7 @@ private enum Command {
             allowed: [
                 "--source", "--destination", "--bpm", "--beats-per-bar",
                 "--input-channel", "--output-channel", "--intro-bars", "--brain",
-                "--progression", "--style"
+                "--progression", "--style", "--human-volume", "--companion-volume"
             ],
             usage: "jam --source NAME --destination NAME [options]"
         )
@@ -160,7 +162,18 @@ private enum Command {
         let tempoBPM = try doubleOption(options, name: "--bpm", default: 120)
         let beatsPerBar = try intOption(options, name: "--beats-per-bar", default: 4)
         let introBars = try intOption(options, name: "--intro-bars", default: 4)
+        let inputChannel = try channelOption(options, name: "--input-channel", default: 1)
         let outputChannel = try channelOption(options, name: "--output-channel", default: 3)
+        let humanVolume = try midiValueOption(
+            options,
+            name: "--human-volume",
+            default: 100
+        )
+        let companionVolume = try midiValueOption(
+            options,
+            name: "--companion-volume",
+            default: 72
+        )
         let brainName = options["--brain"] ?? BrainMode.rules.rawValue
         guard let brain = BrainMode(rawValue: brainName) else {
             throw CLIError.invalidArguments("--brain must be 'rules' or 'jev'.")
@@ -191,13 +204,15 @@ private enum Command {
             destination: destination,
             tempoBPM: tempoBPM,
             beatsPerBar: beatsPerBar,
-            inputChannel: try channelOption(options, name: "--input-channel", default: 1),
+            inputChannel: inputChannel,
             outputChannel: outputChannel,
             introBars: introBars,
             brain: brain,
             webUI: webUICount == 1,
             progression: progression,
-            style: style
+            style: style,
+            humanVolume: humanVolume,
+            companionVolume: companionVolume
         )
     }
 
@@ -264,6 +279,20 @@ private enum Command {
         }
         return parsed
     }
+
+    private static func midiValueOption(
+        _ options: [String: String],
+        name: String,
+        default defaultValue: UInt8
+    ) throws -> UInt8 {
+        guard let value = options[name] else {
+            return defaultValue
+        }
+        guard let parsed = UInt8(value), parsed <= 127 else {
+            throw CLIError.invalidArguments("\(name) must be between 0 and 127.")
+        }
+        return parsed
+    }
 }
 
 private enum CLIError: Error, CustomStringConvertible {
@@ -293,7 +322,7 @@ USAGE
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--intro-bars N] [--brain rules|jev] [--style bass|ambient] [--progression CHORDS] [--ui]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient] [--progression CHORDS] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -507,6 +536,10 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var lastChord: String?
     private var lastDecisionSource: String?
     private var lastNote: String?
+    private var humanVolume: UInt8
+    private var companionVolume: UInt8
+    private var visualEvents: [JamVisualEvent] = []
+    private var nextVisualEventID: UInt64 = 1
 
     init(
         options: JamOptions,
@@ -518,6 +551,10 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         self.output = output
         self.stateHandler = stateHandler
         self.stopSignal = stopSignal
+        humanVolume = options.inputChannel == options.outputChannel
+            ? options.companionVolume
+            : options.humanVolume
+        companionVolume = options.companionVolume
         let musicalState = try MusicalStateConfiguration(
             tempoBPM: options.tempoBPM,
             beatsPerBar: options.beatsPerBar
@@ -553,6 +590,18 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             ),
             decisionProvider: decisionProvider
         )
+        try output.sendControlChange(
+            controller: 7,
+            value: humanVolume,
+            channel: options.inputChannel
+        )
+        if options.outputChannel != options.inputChannel {
+            try output.sendControlChange(
+                controller: 7,
+                value: companionVolume,
+                channel: options.outputChannel
+            )
+        }
     }
 
     func receive(_ event: MIDIEvent) {
@@ -564,6 +613,20 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     func startClockFromWeb() {
         queue.async { [weak self] in
             self?.beginClock(hostTime: MIDIHostTime.now, trigger: "Web UI")
+        }
+    }
+
+    func setHumanVolumeFromWeb(_ value: UInt8) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            setVolume(value, channel: options.inputChannel)
+        }
+    }
+
+    func setCompanionVolumeFromWeb(_ value: UInt8) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            setVolume(value, channel: options.outputChannel)
         }
     }
 
@@ -630,7 +693,14 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         )
         do {
             try process(engine.ingest(sessionEvent), anchorHostTime: anchorHostTime)
-            if event.kind == .noteOn {
+            if options.webUI {
+                appendVisualEvent(
+                    performer: "human",
+                    kind: event.kind.rawValue,
+                    note: event.note,
+                    velocity: event.velocity,
+                    sessionOffsetMicroseconds: offset
+                )
                 publishState(elapsedMicroseconds: offset)
             }
         } catch let error as MusicalStateError {
@@ -716,6 +786,18 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 plan.phrase.messages,
                 anchorHostTime: outputAnchor
             )
+            if options.webUI {
+                for message in plan.phrase.messages {
+                    appendVisualEvent(
+                        performer: "companion",
+                        kind: message.kind.rawValue,
+                        note: message.note,
+                        velocity: message.velocity,
+                        sessionOffsetMicroseconds: message.offsetMicroseconds
+                            + Self.outputSafetyOffsetMicroseconds
+                    )
+                }
+            }
         }
     }
 
@@ -749,9 +831,68 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 chord: barIndex.flatMap { progressionChord(for: $0)?.displayName } ?? lastChord,
                 nextChord: barIndex.flatMap { progressionChord(for: $0 + 1)?.displayName },
                 decisionSource: lastDecisionSource,
-                lastNote: lastNote
+                lastNote: lastNote,
+                humanChannel: options.inputChannel,
+                companionChannel: options.outputChannel,
+                humanVolume: humanVolume,
+                companionVolume: companionVolume,
+                visualEvents: visualEvents
             )
         )
+    }
+
+    private func setVolume(_ value: UInt8, channel: UInt8) {
+        guard !stopped else {
+            return
+        }
+        do {
+            try output.sendControlChange(controller: 7, value: value, channel: channel)
+            if options.inputChannel == options.outputChannel {
+                humanVolume = value
+                companionVolume = value
+            } else if channel == options.inputChannel {
+                humanVolume = value
+            } else {
+                companionVolume = value
+            }
+            publishState(elapsedMicroseconds: currentElapsedMicroseconds())
+        } catch {
+            fail(error)
+        }
+    }
+
+    private func currentElapsedMicroseconds() -> UInt64? {
+        guard let anchorHostTime else {
+            return nil
+        }
+        return MIDIHostTime.microseconds(from: anchorHostTime, to: MIDIHostTime.now)
+    }
+
+    private func appendVisualEvent(
+        performer: String,
+        kind: String,
+        note: UInt8,
+        velocity: UInt8,
+        sessionOffsetMicroseconds: UInt64
+    ) {
+        guard let startedAt else {
+            return
+        }
+        visualEvents.append(
+            JamVisualEvent(
+                id: nextVisualEventID,
+                performer: performer,
+                kind: kind,
+                note: note,
+                velocity: velocity,
+                atUnixMilliseconds: startedAt.timeIntervalSince1970 * 1_000
+                    + Double(sessionOffsetMicroseconds) / 1_000
+            )
+        )
+        nextVisualEventID += 1
+        if visualEvents.count > 64 {
+            visualEvents.removeFirst(visualEvents.count - 64)
+        }
     }
 
     private func progressionChord(for barIndex: Int) -> ChordCandidate? {
@@ -803,6 +944,12 @@ private func runJam(_ options: JamOptions) throws {
 
     print("Listening to \(connectedSources.map(\.name).joined(separator: ", ")) on channel \(options.inputChannel).")
     print("Output: \(destination.name), channel \(options.outputChannel), \(options.tempoBPM) BPM, \(options.beatsPerBar)/4.")
+    if options.inputChannel == options.outputChannel {
+        print("Mix: shared=\(options.companionVolume) on channel \(options.inputChannel).")
+        print("warning: input and output use the same MIDI channel, so their volume controls are linked.")
+    } else {
+        print("Mix: you=\(options.humanVolume) on channel \(options.inputChannel), companion=\(options.companionVolume) on channel \(options.outputChannel).")
+    }
     print("Style: \(options.style.rawValue).")
     print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
     if !options.progression.isEmpty {

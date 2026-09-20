@@ -13,4 +13,20 @@ final class MIDIHostTimeTests: XCTestCase {
     func testEarlierHostTimeClampsToZero() {
         XCTAssertEqual(MIDIHostTime.microseconds(from: 200, to: 100), 0)
     }
+
+    func testControlChangeEncodesChannelVolume() throws {
+        XCTAssertEqual(
+            try MIDIControlChangeEncoder.bytes(controller: 7, value: 72, channel: 2),
+            [0xB1, 7, 72]
+        )
+    }
+
+    func testControlChangeRejectsOutOfRangeData() {
+        XCTAssertThrowsError(
+            try MIDIControlChangeEncoder.bytes(controller: 7, value: 128, channel: 2)
+        )
+        XCTAssertThrowsError(
+            try MIDIControlChangeEncoder.bytes(controller: 7, value: 72, channel: 17)
+        )
+    }
 }

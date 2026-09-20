@@ -2,6 +2,15 @@ import Dispatch
 import Foundation
 import Network
 
+struct JamVisualEvent: Codable, Sendable {
+    let id: UInt64
+    let performer: String
+    let kind: String
+    let note: UInt8
+    let velocity: UInt8
+    let atUnixMilliseconds: Double
+}
+
 struct JamWebState: Codable, Sendable {
     let running: Bool
     let tempoBPM: Double
@@ -19,10 +28,17 @@ struct JamWebState: Codable, Sendable {
     let nextChord: String?
     let decisionSource: String?
     let lastNote: String?
+    let humanChannel: UInt8
+    let companionChannel: UInt8
+    let humanVolume: UInt8
+    let companionVolume: UInt8
+    let visualEvents: [JamVisualEvent]
 }
 
 protocol JamWebControlling: AnyObject, Sendable {
     func startClockFromWeb()
+    func setHumanVolumeFromWeb(_ value: UInt8)
+    func setCompanionVolumeFromWeb(_ value: UInt8)
 }
 
 /// A loopback-only HTTP/SSE bridge. It never handles MIDI inside a Network
@@ -127,7 +143,27 @@ final class JamWebServer: @unchecked Sendable {
             return
         }
 
-        switch (String(parts[0]), String(parts[1])) {
+        let method = String(parts[0])
+        let path = String(parts[1])
+        if method == "POST", let volume = Self.volumeCommand(path: path) {
+            guard isTrustedBrowserRequest(request) else {
+                respond(status: "403 Forbidden", body: Data(), connection: connection)
+                return
+            }
+            switch volume.performer {
+            case "human":
+                controller?.setHumanVolumeFromWeb(volume.value)
+            case "companion":
+                controller?.setCompanionVolumeFromWeb(volume.value)
+            default:
+                respond(status: "404 Not Found", body: Data(), connection: connection)
+                return
+            }
+            respond(status: "202 Accepted", body: Data("mixing".utf8), connection: connection)
+            return
+        }
+
+        switch (method, path) {
         case ("GET", "/"):
             respond(status: "200 OK", contentType: "text/html; charset=utf-8", body: html, connection: connection)
         case ("GET", "/events"):
@@ -150,6 +186,18 @@ final class JamWebServer: @unchecked Sendable {
         default:
             respond(status: "404 Not Found", body: Data("not found".utf8), connection: connection)
         }
+    }
+
+    private static func volumeCommand(path: String) -> (performer: String, value: UInt8)? {
+        let parts = path.split(separator: "/")
+        guard parts.count == 4,
+              parts[0] == "api",
+              parts[1] == "volume",
+              let value = UInt8(parts[3]),
+              value <= 127 else {
+            return nil
+        }
+        return (String(parts[2]), value)
     }
 
     private func isTrustedBrowserRequest(_ request: String) -> Bool {

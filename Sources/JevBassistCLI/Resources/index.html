@@ -3,48 +3,62 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jev Bassist — Shared Clock</title>
+  <title>Jev Ensemble — Live System</title>
   <style>
     :root {
       color-scheme: dark;
       --ink: #f2f0e8;
       --muted: #85877f;
-      --panel: rgba(20, 21, 20, .82);
-      --line: rgba(242, 240, 232, .12);
+      --panel: rgba(14, 15, 14, .78);
+      --line: rgba(242, 240, 232, .13);
       --acid: #c8ff45;
-      --acid-soft: rgba(200, 255, 69, .14);
+      --acid-soft: rgba(200, 255, 69, .15);
       --orange: #ff785a;
-      --beat-duration: 500ms;
     }
 
     * { box-sizing: border-box; }
-
     html, body { min-height: 100%; }
 
     body {
       margin: 0;
-      background:
-        radial-gradient(circle at 72% 18%, rgba(200, 255, 69, .055), transparent 26rem),
-        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
-        #0a0b0a;
-      background-size: auto, 32px 32px, 32px 32px, auto;
+      overflow-x: hidden;
+      background: #080908;
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
       letter-spacing: -.015em;
     }
 
-    button, select, input { font: inherit; }
+    body::after {
+      position: fixed;
+      inset: 0;
+      content: "";
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 50%, transparent 0, rgba(0,0,0,.32) 75%);
+      z-index: 1;
+    }
+
+    #visualizer {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    button, input { font: inherit; }
 
     .shell {
+      position: relative;
+      z-index: 2;
       min-height: 100vh;
       display: grid;
       grid-template-rows: auto 1fr auto;
       padding: clamp(18px, 3vw, 42px);
-      gap: clamp(24px, 4vw, 56px);
+      gap: clamp(20px, 3vw, 44px);
     }
 
-    header {
+    header, footer {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -55,17 +69,21 @@
       display: flex;
       align-items: baseline;
       gap: 12px;
+      font-size: 22px;
       font-weight: 760;
       letter-spacing: -.055em;
-      font-size: 22px;
+    }
+
+    .brand span, footer, .connection, .stream-labels, .phase, .eyebrow {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-transform: uppercase;
     }
 
     .brand span {
       color: var(--muted);
+      font-size: 11px;
       font-weight: 500;
       letter-spacing: .08em;
-      font-size: 10px;
-      text-transform: uppercase;
     }
 
     .connection {
@@ -73,14 +91,14 @@
       align-items: center;
       gap: 9px;
       color: var(--muted);
-      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 600;
       letter-spacing: .08em;
-      text-transform: uppercase;
     }
 
     .dot {
-      width: 8px;
-      height: 8px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
       background: #464844;
       box-shadow: 0 0 0 5px rgba(255,255,255,.035);
@@ -93,34 +111,48 @@
 
     main {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
-      gap: clamp(24px, 5vw, 72px);
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 390px);
+      gap: clamp(28px, 5vw, 76px);
       align-items: center;
-      max-width: 1500px;
       width: 100%;
+      max-width: 1540px;
       margin: 0 auto;
     }
 
     .clock {
       min-width: 0;
       display: grid;
-      gap: 30px;
+      gap: 26px;
+      padding: clamp(12px, 2vw, 28px) 0;
+      text-shadow: 0 2px 28px #080908;
     }
+
+    .stream-labels {
+      display: flex;
+      justify-content: space-between;
+      max-width: 760px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .16em;
+    }
+
+    .stream-labels .companion { color: var(--acid); }
 
     .phase {
       display: flex;
       align-items: center;
       gap: 12px;
       color: var(--acid);
-      font: 650 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      font-weight: 650;
       letter-spacing: .11em;
-      text-transform: uppercase;
     }
 
     .phase::before {
-      content: "";
       width: 34px;
       height: 1px;
+      content: "";
       background: currentColor;
     }
 
@@ -133,19 +165,19 @@
     .measure { min-width: 0; }
 
     .eyebrow {
-      color: var(--muted);
-      font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-      letter-spacing: .16em;
-      text-transform: uppercase;
       margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .16em;
     }
 
     .bar-number {
       font-size: clamp(78px, 13vw, 190px);
-      line-height: .78;
-      letter-spacing: -.085em;
       font-weight: 720;
       font-variant-numeric: tabular-nums;
+      letter-spacing: -.085em;
+      line-height: .78;
     }
 
     .pulse-wrap {
@@ -169,10 +201,10 @@
 
     .beat-number {
       font-size: clamp(62px, 9vw, 124px);
-      line-height: 1;
       font-weight: 650;
-      letter-spacing: -.07em;
       font-variant-numeric: tabular-nums;
+      letter-spacing: -.07em;
+      line-height: 1;
     }
 
     .beat-strip {
@@ -183,83 +215,140 @@
     }
 
     .beat-cell {
-      height: 8px;
+      height: 7px;
+      overflow: hidden;
       border-radius: 99px;
       background: var(--line);
-      overflow: hidden;
       transition: background .08s ease, transform .08s ease;
     }
 
     .beat-cell.active {
       background: var(--acid);
-      transform: scaleY(1.55);
       box-shadow: 0 0 22px rgba(200,255,69,.25);
+      transform: scaleY(1.55);
     }
 
     .caption {
-      color: var(--muted);
       max-width: 620px;
-      font-size: clamp(14px, 1.4vw, 17px);
+      color: var(--muted);
+      font-size: clamp(13px, 1.3vw, 16px);
       line-height: 1.55;
     }
 
     .panel {
-      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 18px;
       padding: 22px;
-      box-shadow: 0 30px 80px rgba(0,0,0,.28);
-      backdrop-filter: blur(16px);
+      background: var(--panel);
+      box-shadow: 0 30px 90px rgba(0,0,0,.38);
+      backdrop-filter: blur(22px);
     }
 
-    .panel-title {
+    .panel-title, .mix-heading, .mix-label {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 22px;
     }
 
-    .panel-title h2 {
+    .panel-title { margin-bottom: 20px; }
+
+    .panel-title h2, .mix-heading h3 {
       margin: 0;
-      font-size: 13px;
-      letter-spacing: .08em;
+      font-size: 12px;
+      letter-spacing: .1em;
       text-transform: uppercase;
     }
 
-    .note-readout {
-      color: var(--muted);
-      font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    .note-readout, .mix-value, .channel-tag {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
     }
 
-    .field { margin-top: 15px; }
+    .note-readout { color: var(--muted); font-size: 11px; }
+    .field { margin-top: 14px; }
 
     label {
       display: block;
       margin: 0 0 7px 2px;
       color: var(--muted);
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 700;
       letter-spacing: .11em;
       text-transform: uppercase;
     }
 
-    select, input {
+    input[type="text"] {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 10px;
+      padding: 11px 12px;
+      outline: none;
       background: rgba(255,255,255,.035);
       color: var(--ink);
-      padding: 12px 13px;
-      outline: none;
     }
-
-    select:focus, input:focus { border-color: rgba(200,255,69,.65); }
 
     .row {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
-      gap: 10px;
+      gap: 9px;
     }
+
+    .mixer {
+      margin-top: 22px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+    }
+
+    .mix-heading { margin-bottom: 16px; }
+    .mix-heading span { color: var(--muted); font-size: 11px; letter-spacing: .1em; }
+    .mix-channel + .mix-channel { margin-top: 17px; }
+
+    .mix-label {
+      margin-bottom: 8px;
+      font-size: 11px;
+      font-weight: 720;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .mix-label .companion-name { color: var(--acid); }
+    .channel-tag { color: var(--muted); font-size: 11px; }
+    .mix-value { min-width: 3ch; text-align: right; font-size: 11px; }
+
+    input[type="range"] {
+      width: 100%;
+      height: 18px;
+      margin: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      cursor: pointer;
+      background: transparent;
+    }
+
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 3px;
+      border-radius: 0;
+      background: linear-gradient(90deg, var(--ink) var(--level, 50%), var(--line) 0);
+    }
+
+    input[type="range"].companion-slider::-webkit-slider-runnable-track {
+      background: linear-gradient(90deg, var(--acid) var(--level, 50%), var(--line) 0);
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      width: 12px;
+      height: 12px;
+      margin-top: -4.5px;
+      border: 0;
+      border-radius: 50%;
+      appearance: none;
+      -webkit-appearance: none;
+      background: var(--ink);
+      box-shadow: 0 0 0 4px rgba(242,240,232,.08);
+    }
+
+    input[type="range"].companion-slider::-webkit-slider-thumb { background: var(--acid); }
+    input[type="range"]:disabled { cursor: default; opacity: .35; }
 
     .actions {
       display: grid;
@@ -279,50 +368,51 @@
 
     button:hover { transform: translateY(-1px); }
     button:active { transform: translateY(0); }
-
+    button:disabled { cursor: default; opacity: .42; transform: none; }
     .primary { background: var(--acid); color: #10120b; }
-    .primary.armed { background: var(--orange); color: #180d0a; }
     .secondary { background: rgba(255,255,255,.07); color: var(--ink); }
 
     .hint {
-      min-height: 34px;
-      margin-top: 14px;
+      min-height: 32px;
+      margin-top: 13px;
       color: var(--muted);
       font-size: 11px;
       line-height: 1.5;
     }
 
     footer {
-      display: flex;
-      justify-content: space-between;
-      gap: 20px;
       color: #60625d;
-      font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-      letter-spacing: .06em;
-      text-transform: uppercase;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .07em;
+      line-height: 1.4;
     }
 
     @media (max-width: 820px) {
+      .shell { min-height: 100svh; }
       main { grid-template-columns: 1fr; }
       .panel { max-width: none; }
       .numbers { justify-content: space-between; }
-      footer { flex-direction: column; }
+      footer { flex-direction: column; align-items: flex-start; }
     }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { transition: none !important; }
+      #visualizer { opacity: .5; }
     }
   </style>
 </head>
 <body>
+  <canvas id="visualizer" aria-hidden="true"></canvas>
   <div class="shell">
     <header>
-      <div class="brand">JEV/ENSEMBLE <span>shared clock</span></div>
+      <div class="brand">JEV/ENSEMBLE <span>live system</span></div>
       <div class="connection" id="connection"><i class="dot"></i><span id="connectionText">Connecting to Swift</span></div>
     </header>
 
     <main>
       <section class="clock" aria-live="polite">
+        <div class="stream-labels"><span>You / input</span><span class="companion">Jev / companion</span></div>
         <div class="phase" id="phase">Waiting for clock</div>
         <div class="numbers">
           <div class="measure">
@@ -338,7 +428,7 @@
           </div>
         </div>
         <div class="beat-strip" id="beatStrip"></div>
-        <div class="caption" id="caption">This display follows the clock inside the running Swift session.</div>
+        <div class="caption" id="caption">Both performers are rendered from the authoritative Swift MIDI timeline.</div>
       </section>
 
       <aside class="panel">
@@ -348,48 +438,87 @@
         </div>
         <div class="field">
           <label for="midiInput">Swift MIDI route</label>
-          <input id="midiInput" value="Waiting for session" disabled>
+          <input type="text" id="midiInput" value="Waiting for session" disabled>
         </div>
         <div class="row">
           <div class="field">
             <label for="bpm">BPM</label>
-            <input id="bpm" value="—" disabled>
+            <input type="text" id="bpm" value="—" disabled>
           </div>
           <div class="field">
             <label for="beats">Beats</label>
-            <input id="beats" value="—" disabled>
+            <input type="text" id="beats" value="—" disabled>
           </div>
           <div class="field">
             <label for="intro">Intro bars</label>
-            <input id="intro" value="—" disabled>
+            <input type="text" id="intro" value="—" disabled>
           </div>
         </div>
+
+        <section class="mixer" aria-label="MIDI channel mixer">
+          <div class="mix-heading"><h3>Live mix</h3><span>Channel volume · CC7</span></div>
+          <div class="mix-channel">
+            <div class="mix-label">
+              <span>You <span class="channel-tag" id="humanChannel">CH —</span></span>
+              <output class="mix-value" id="humanVolumeValue">—</output>
+            </div>
+            <input type="range" id="humanVolume" min="0" max="127" value="100" disabled aria-label="Your performance volume">
+          </div>
+          <div class="mix-channel">
+            <div class="mix-label">
+              <span class="companion-name">Jev <span class="channel-tag" id="companionChannel">CH —</span></span>
+              <output class="mix-value" id="companionVolumeValue">—</output>
+            </div>
+            <input type="range" class="companion-slider" id="companionVolume" min="0" max="127" value="72" disabled aria-label="Jev companion volume">
+          </div>
+        </section>
+
         <div class="actions">
           <button class="primary" id="armButton" disabled>Start</button>
           <button class="secondary" id="resetButton" type="button" disabled>Stop</button>
         </div>
-        <div class="hint" id="hint">Start this page with <code>jev-bassist jam ... --ui</code>. MIDI and the API key stay in the Swift process.</div>
+        <div class="hint" id="hint">MIDI control and visualization stay local. No audio or API key is sent to this page.</div>
       </aside>
     </main>
 
     <footer>
-      <span>Clock source · Swift / CoreMIDI</span>
+      <span>Clock + visual source · Swift / CoreMIDI</span>
       <span id="footerTiming">Waiting for session</span>
     </footer>
   </div>
 
   <script>
     const ui = Object.fromEntries([
-      'connection','connectionText','phase','barNumber','beatNumber','pulseWrap','beatStrip',
-      'caption','midiInput','bpm','beats','intro','armButton','resetButton','hint',
-      'noteReadout','footerTiming'
+      'visualizer','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
+      'beatStrip','caption','midiInput','bpm','beats','intro','armButton','resetButton','hint',
+      'noteReadout','footerTiming','humanChannel','companionChannel','humanVolume',
+      'companionVolume','humanVolumeValue','companionVolumeValue'
     ].map(id => [id, document.getElementById(id)]));
 
+    const context = ui.visualizer.getContext('2d');
+    const pendingEvents = [];
+    const activeNotes = new Map();
+    const pulses = [];
+    const volumeTimers = {};
     let state = null;
-    let animationFrame = 0;
     let renderedBeat = -1;
+    let renderedBeatsPerBar = 0;
+    let highestVisualEventID = 0;
+    let viewportWidth = 0;
+    let viewportHeight = 0;
+
+    function resizeCanvas() {
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      viewportWidth = window.innerWidth;
+      viewportHeight = window.innerHeight;
+      ui.visualizer.width = Math.round(viewportWidth * ratio);
+      ui.visualizer.height = Math.round(viewportHeight * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
 
     function rebuildBeats(count) {
+      if (renderedBeatsPerBar === count) return;
+      renderedBeatsPerBar = count;
       document.documentElement.style.setProperty('--beats', count);
       ui.beatStrip.replaceChildren(...Array.from({length: count}, (_, index) => {
         const cell = document.createElement('div');
@@ -399,14 +528,37 @@
       }));
     }
 
+    function setSlider(slider, output, value) {
+      if (document.activeElement !== slider) slider.value = value;
+      output.value = String(value).padStart(3, '0');
+      slider.style.setProperty('--level', `${value / 127 * 100}%`);
+    }
+
+    function ingestVisualEvents(events) {
+      const now = Date.now();
+      for (const event of [...events].sort((a, b) => a.id - b.id)) {
+        if (event.id <= highestVisualEventID) continue;
+        highestVisualEventID = event.id;
+        if (event.atUnixMilliseconds >= now - 1500) pendingEvents.push(event);
+      }
+      pendingEvents.sort((a, b) => a.atUnixMilliseconds - b.atUnixMilliseconds);
+    }
+
     function applyState(next) {
       state = next;
+      ingestVisualEvents(next.visualEvents ?? []);
       ui.connection.classList.add('online');
       ui.connectionText.textContent = 'Swift connected';
       ui.midiInput.value = `${next.source} → ${next.destination}`;
       ui.bpm.value = next.tempoBPM;
       ui.beats.value = next.beatsPerBar;
       ui.intro.value = next.introBars;
+      ui.humanChannel.textContent = `CH ${next.humanChannel}`;
+      ui.companionChannel.textContent = `CH ${next.companionChannel}`;
+      setSlider(ui.humanVolume, ui.humanVolumeValue, next.humanVolume);
+      setSlider(ui.companionVolume, ui.companionVolumeValue, next.companionVolume);
+      ui.humanVolume.disabled = next.phase === 'stopped';
+      ui.companionVolume.disabled = next.phase === 'stopped';
       ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style} after ${next.introBars} bars`;
       const harmony = next.nextChord
         ? `${next.chord ?? '—'} → ${next.nextChord}`
@@ -416,27 +568,153 @@
       ui.resetButton.disabled = next.phase === 'stopped';
       ui.armButton.textContent = next.running ? 'Running' : 'Start';
       rebuildBeats(next.beatsPerBar);
-      renderedBeat = -1;
 
       if (!next.running) {
-        cancelAnimationFrame(animationFrame);
         ui.barNumber.textContent = '—';
         ui.beatNumber.textContent = '—';
         ui.pulseWrap.style.setProperty('--pulse', 0);
         ui.phase.textContent = next.phase === 'stopped' ? 'Session stopped' : 'Ready';
         ui.caption.textContent = next.phase === 'stopped'
           ? 'The Swift session has stopped safely.'
-          : 'Press Start on the downbeat. Swift will start MIDI scheduling and this display together.';
-        return;
+          : 'Press Start on the downbeat. Both MIDI performers will share this clock and visual field.';
       }
-      cancelAnimationFrame(animationFrame);
-      render();
     }
 
-    function render() {
-      if (!state?.running || state.startedAtUnixMilliseconds == null) return;
+    function triggerVisualEvent(event, now) {
+      const key = `${event.performer}:${event.note}`;
+      if (event.kind === 'noteOn' && event.velocity > 0) {
+        activeNotes.set(key, {...event, startedAt: now});
+      } else {
+        activeNotes.delete(key);
+      }
+      pulses.push({...event, bornAt: now});
+      if (pulses.length > 96) pulses.splice(0, pulses.length - 96);
+    }
+
+    function consumeVisualEvents(now) {
+      while (pendingEvents.length && pendingEvents[0].atUnixMilliseconds <= now + 8) {
+        triggerVisualEvent(pendingEvents.shift(), now);
+      }
+      for (const [key, note] of activeNotes) {
+        if (now - note.startedAt > 15000) activeNotes.delete(key);
+      }
+    }
+
+    function pitchY(note) {
+      const normalized = Math.max(0, Math.min(1, (note - 36) / 48));
+      return viewportHeight * (.80 - normalized * .60);
+    }
+
+    function performerGain(performer) {
+      if (!state) return .5;
+      const value = performer === 'human' ? state.humanVolume : state.companionVolume;
+      return Math.max(.08, value / 127);
+    }
+
+    function drawGrid(beatProgress, absoluteBeat) {
+      context.clearRect(0, 0, viewportWidth, viewportHeight);
+      context.lineWidth = 1;
+      context.strokeStyle = 'rgba(242,240,232,.045)';
+      const spacing = Math.max(48, Math.round(viewportWidth / 20));
+      context.beginPath();
+      for (let x = spacing; x < viewportWidth; x += spacing) {
+        context.moveTo(x + .5, 0);
+        context.lineTo(x + .5, viewportHeight);
+      }
+      for (let y = spacing; y < viewportHeight; y += spacing) {
+        context.moveTo(0, y + .5);
+        context.lineTo(viewportWidth, y + .5);
+      }
+      context.stroke();
+
+      const scanX = beatProgress * viewportWidth;
+      const downbeat = state && absoluteBeat % state.beatsPerBar === 0;
+      context.strokeStyle = downbeat ? 'rgba(200,255,69,.32)' : 'rgba(242,240,232,.14)';
+      context.beginPath();
+      context.moveTo(scanX, 0);
+      context.lineTo(scanX, viewportHeight);
+      context.stroke();
+    }
+
+    function drawActiveNotes(now) {
+      const human = [];
+      const companion = [];
+      for (const note of activeNotes.values()) {
+        const list = note.performer === 'human' ? human : companion;
+        list.push(note);
+        const y = pitchY(note.note);
+        const gain = performerGain(note.performer);
+        const energy = (note.velocity / 127) * gain;
+        const age = Math.min(1, (now - note.startedAt) / 1800);
+        const fromLeft = note.performer === 'human';
+        const edge = fromLeft ? 0 : viewportWidth;
+        const inner = fromLeft ? viewportWidth * (.34 + age * .08) : viewportWidth * (.66 - age * .08);
+        const color = fromLeft ? `rgba(242,240,232,${.2 + energy * .72})` : `rgba(200,255,69,${.2 + energy * .72})`;
+
+        context.strokeStyle = color;
+        context.lineWidth = 1 + energy * 2.2;
+        context.beginPath();
+        context.moveTo(edge, y);
+        context.lineTo(inner, y);
+        context.stroke();
+
+        const size = 4 + energy * 15;
+        context.strokeRect(inner - size / 2, y - size / 2, size, size);
+      }
+
+      for (const left of human) {
+        if (!companion.length) break;
+        const right = companion.reduce((best, note) =>
+          Math.abs(note.note - left.note) < Math.abs(best.note - left.note) ? note : best
+        );
+        const alpha = .08 + Math.min(1, performerGain('human') * performerGain('companion')) * .18;
+        context.strokeStyle = `rgba(200,255,69,${alpha})`;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(viewportWidth * .42, pitchY(left.note));
+        context.lineTo(viewportWidth * .58, pitchY(right.note));
+        context.stroke();
+      }
+    }
+
+    function drawPulses(now) {
+      for (let index = pulses.length - 1; index >= 0; index--) {
+        const pulse = pulses[index];
+        const lifetime = pulse.kind === 'noteOn' ? 1500 : 700;
+        const progress = (now - pulse.bornAt) / lifetime;
+        if (progress >= 1) {
+          pulses.splice(index, 1);
+          continue;
+        }
+        const fromLeft = pulse.performer === 'human';
+        const x = viewportWidth * (fromLeft ? .42 : .58);
+        const y = pitchY(pulse.note);
+        const gain = performerGain(pulse.performer);
+        const energy = Math.max(.12, pulse.velocity / 127) * gain;
+        const radius = 5 + progress * (34 + energy * 42);
+        const alpha = (1 - progress) * (.18 + energy * .5);
+        context.strokeStyle = fromLeft
+          ? `rgba(242,240,232,${alpha})`
+          : `rgba(200,255,69,${alpha})`;
+        context.lineWidth = pulse.kind === 'noteOn' ? 1.2 : .6;
+        context.beginPath();
+        context.arc(x, y, radius, 0, Math.PI * 2);
+        context.stroke();
+
+        if (pulse.kind === 'noteOn') {
+          const angle = (pulse.id * 2.399963) % (Math.PI * 2);
+          context.beginPath();
+          context.moveTo(x, y);
+          context.lineTo(x + Math.cos(angle) * radius * 1.6, y + Math.sin(angle) * radius * 1.6);
+          context.stroke();
+        }
+      }
+    }
+
+    function updateClock(now) {
+      if (!state?.running || state.startedAtUnixMilliseconds == null) return {beatProgress: 0, absoluteBeat: 0};
       const beatMs = 60000 / state.tempoBPM;
-      const elapsed = Math.max(0, Date.now() - state.startedAtUnixMilliseconds);
+      const elapsed = Math.max(0, now - state.startedAtUnixMilliseconds);
       const absoluteBeat = Math.floor(elapsed / beatMs);
       const beatProgress = (elapsed % beatMs) / beatMs;
       const beat = absoluteBeat % state.beatsPerBar + 1;
@@ -454,14 +732,24 @@
         if (introRemaining > 0) {
           ui.phase.textContent = `Intro · ${state.style} in ${introRemaining} ${introRemaining === 1 ? 'bar' : 'bars'}`;
           const listener = state.brain === 'jev' ? 'Jev' : 'The local rule engine';
-          ui.caption.textContent = `Swift position: bar ${bar}, beat ${beat}. Play while ${listener} listens and prepares.`;
+          ui.caption.textContent = `Bar ${bar}, beat ${beat}. Play while ${listener} listens and prepares.`;
         } else {
           const source = state.decisionSource ? ` · ${state.decisionSource}` : '';
           ui.phase.textContent = `Live · ${state.brain}${source}`;
-          ui.caption.textContent = `Authoritative Swift position: bar ${bar}, beat ${beat}.`;
+          ui.caption.textContent = `Your notes enter from the left; ${state.style} responses enter from the right.`;
         }
       }
-      animationFrame = requestAnimationFrame(render);
+      return {beatProgress, absoluteBeat};
+    }
+
+    function render() {
+      const now = Date.now();
+      consumeVisualEvents(now);
+      const clock = updateClock(now);
+      drawGrid(clock.beatProgress, clock.absoluteBeat);
+      drawActiveNotes(now);
+      drawPulses(now);
+      requestAnimationFrame(render);
     }
 
     async function command(name) {
@@ -473,8 +761,22 @@
       }
     }
 
+    function queueVolume(performer, value) {
+      const slider = performer === 'human' ? ui.humanVolume : ui.companionVolume;
+      const output = performer === 'human' ? ui.humanVolumeValue : ui.companionVolumeValue;
+      setSlider(slider, output, Number(value));
+      clearTimeout(volumeTimers[performer]);
+      volumeTimers[performer] = setTimeout(() => command(`volume/${performer}/${value}`), 45);
+    }
+
     ui.armButton.addEventListener('click', () => command('start'));
     ui.resetButton.addEventListener('click', () => command('stop'));
+    ui.humanVolume.addEventListener('input', event => queueVolume('human', event.target.value));
+    ui.companionVolume.addEventListener('input', event => queueVolume('companion', event.target.value));
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+    rebuildBeats(4);
+    requestAnimationFrame(render);
 
     const events = new EventSource('/events');
     events.onmessage = event => applyState(JSON.parse(event.data));
@@ -483,6 +785,8 @@
       ui.connectionText.textContent = 'Swift disconnected';
       ui.armButton.disabled = true;
       ui.resetButton.disabled = true;
+      ui.humanVolume.disabled = true;
+      ui.companionVolume.disabled = true;
     };
   </script>
 </body>

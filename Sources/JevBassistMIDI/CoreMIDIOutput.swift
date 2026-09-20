@@ -22,6 +22,7 @@ public enum CoreMIDIOutputError: Error, CustomStringConvertible {
     case noMatchingDestination(String)
     case ambiguousDestination(String, matches: [String])
     case notConnected
+    case invalidControlChange(channel: UInt8, controller: UInt8, value: UInt8)
     case packetConstruction
     case send(OSStatus)
     case flush(OSStatus)
@@ -40,6 +41,8 @@ public enum CoreMIDIOutputError: Error, CustomStringConvertible {
             return "MIDI output destination '\(query)' is ambiguous: \(matches.joined(separator: ", ")). Use a more specific name."
         case .notConnected:
             return "No MIDI output destination is connected."
+        case let .invalidControlChange(channel, controller, value):
+            return "Invalid MIDI control change: channel \(channel), controller \(controller), value \(value)."
         case .packetConstruction:
             return "Could not construct a CoreMIDI packet."
         case let .send(status):
@@ -86,6 +89,23 @@ public enum MIDIHostTime {
         var value = mach_timebase_info_data_t()
         mach_timebase_info(&value)
         return value
+    }
+}
+
+enum MIDIControlChangeEncoder {
+    static func bytes(
+        controller: UInt8,
+        value: UInt8,
+        channel: UInt8
+    ) throws -> [UInt8] {
+        guard (1...16).contains(channel), controller <= 127, value <= 127 else {
+            throw CoreMIDIOutputError.invalidControlChange(
+                channel: channel,
+                controller: controller,
+                value: value
+            )
+        }
+        return [UInt8(0xB0 | ((channel - 1) & 0x0F)), controller, value]
     }
 }
 
@@ -200,6 +220,30 @@ public final class CoreMIDIOutput: @unchecked Sendable {
                 destination: destination.endpoint
             )
         }
+    }
+
+    /// Sends an immediate MIDI Control Change. Live mix controls use CC7 on
+    /// separate synth-part channels; this method never runs in the input callback.
+    public func sendControlChange(
+        controller: UInt8,
+        value: UInt8,
+        channel: UInt8
+    ) throws {
+        let bytes = try MIDIControlChangeEncoder.bytes(
+            controller: controller,
+            value: value,
+            channel: channel
+        )
+        lock.lock()
+        defer { lock.unlock() }
+        guard let destination else {
+            throw CoreMIDIOutputError.notConnected
+        }
+        try sendPacket(
+            bytes,
+            at: MIDIHostTime.now,
+            destination: destination.endpoint
+        )
     }
 
     /// Cancels timestamped packets not yet delivered, then silences the active
