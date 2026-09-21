@@ -32,7 +32,8 @@ let package = Package(
         ),
         .testTarget(
             name: "JevBassistCoreTests",
-            dependencies: ["JevBassistCore"]
+            dependencies: ["JevBassistCore"],
+            resources: [.process("Fixtures")]
         ),
         .testTarget(
             name: "JevBassistJevTests",

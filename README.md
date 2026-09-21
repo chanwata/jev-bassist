@@ -20,6 +20,7 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - print receipt time, CoreMIDI host time, MIDI note number, note name, velocity, and channel;
 - capture a performance as a versioned, timestamped JSON fixture;
 - replay a fixture without MIDI hardware;
+- evaluate a fixture through the complete local ensemble engine and save its snapshots, bounded decisions, and scheduled MIDI messages as a deterministic trace;
 - derive beat and bar snapshots containing note density, velocity, register, held notes, a pulse estimate, and ranked chord candidates;
 - make a bounded rule-based bass decision once per completed bar;
 - ask Jev for `activity`, `relationship`, `motion`, and `fill` in one typed request;
@@ -314,6 +315,26 @@ beat beat=1 bar=1.1 notes=3 density=3.00 velocity=90.0 register=63.7 held=E4@1,G
 bar bar=1 notes=8 density=2.00 velocity=84.5 register=61.8 held=- pulse=120.0(1.00) chords=C major:0.82
 ```
 
+## Evaluate the complete local ensemble
+
+`replay` prints analyzer state only. Use `evaluate` when a change to the local decision or phrase engine must be compared without sending any MIDI:
+
+```bash
+swift run jev-bassist evaluate \
+  session.json \
+  evaluation.json \
+  --bpm 120 \
+  --beats-per-bar 4 \
+  --intro-bars 0 \
+  --output-channel 3 \
+  --style fugue \
+  --mode dorian
+```
+
+The output is a versioned, secret-free JSON trace containing the original input fixture, exact configuration, local rule policy, every beat/bar snapshot, every bar plan, and every scheduled Note On/Off message. It does not contact Jev, wait in real time, or open a CoreMIDI output. The command refuses to overwrite an existing trace so two implementations can be evaluated into separate files and compared directly.
+
+This evaluation command records the current engine faithfully; it does not make the current eight-stage fugue conversational. The next milestones will first add note-duration-aware motif memory and interruptible short-horizon scheduling, then replace the fixed development path.
+
 ## Build and test
 
 ```bash
@@ -321,13 +342,13 @@ swift build
 swift test
 ```
 
-Pure MIDI decoding, fixture validation, replay, musical-state analysis, bounded decisions, and phrase generation live in `JevBassistCore`. The typed HTTP client and pipelined provider live in `JevBassistJev`. Apple-specific input, output, host-time conversion, and scheduling live behind `JevBassistMIDI`. Codec, confidence fallback, deadline, cancellation, and prefetch behavior are covered by tests. GitHub Actions runs both commands on macOS for every pull request.
+Pure MIDI decoding, fixture validation, replay, deterministic ensemble evaluation, musical-state analysis, bounded decisions, and phrase generation live in `JevBassistCore`. The typed HTTP client and pipelined provider live in `JevBassistJev`. Apple-specific input, output, host-time conversion, and scheduling live behind `JevBassistMIDI`. Codec, confidence fallback, deadline, cancellation, and prefetch behavior are covered by tests. GitHub Actions runs both commands on macOS for every pull request.
 
 ## Planned path
 
-1. Verify the revised pocket generator and `--brain jev` on the JD-Xi using the same captured performance.
-2. Add explicit key or chord-progression input for melody-only sessions; guessing harmony from a monophonic line remains intentionally unsupported.
-3. Compare `rules` and `jev` modes using identical replays and live sessions.
-4. Report p50, p95, and p99 decision latency and stability statistics for evaluation.
+1. Preserve Note On/Off duration, accent, rests, and cross-bar phrasing in a versioned motif memory.
+2. Replace whole-bar output submission with a safe short-horizon scheduler that can reconsider unsent notes when the player re-enters.
+3. Replace the fixed fugue development with a one-voice modal response whose connection to the human motif is audible before adding further development.
+4. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.
