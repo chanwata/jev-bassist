@@ -34,6 +34,8 @@ public struct JevChordState: Codable, Equatable, Sendable {
 public struct JevBassState: Codable, Equatable, Sendable {
     public let accompanimentStyle: String
     public let developmentStage: String?
+    public let mode: String?
+    public let tonalCenterPitchClass: UInt8?
     public let targetBarIndex: Int
     public let phrasePosition: Int
     public let noteOnCount: Int
@@ -52,6 +54,8 @@ public struct JevBassState: Codable, Equatable, Sendable {
     public init(input: BassDecisionInput) {
         accompanimentStyle = input.style.rawValue
         developmentStage = input.developmentStage?.rawValue
+        mode = input.mode?.rawValue
+        tonalCenterPitchClass = input.tonalCenterPitchClass
         targetBarIndex = input.targetBarIndex
         phrasePosition = input.targetBarIndex % 4
         noteOnCount = input.state.noteOnCount
@@ -89,6 +93,8 @@ public struct JevBassState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case accompanimentStyle = "accompaniment_style"
         case developmentStage = "motif_development_stage"
+        case mode
+        case tonalCenterPitchClass = "tonal_center_pitch_class"
         case targetBarIndex = "target_bar_index"
         case phrasePosition = "phrase_position_in_four_bar_cycle"
         case noteOnCount = "note_on_count"

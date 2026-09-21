@@ -48,12 +48,16 @@ final class JevDecisionProviderTests: XCTestCase {
             input: makeInput(
                 targetBarIndex: 7,
                 style: .fugue,
-                developmentStage: .stretto
+                developmentStage: .stretto,
+                mode: .dorian,
+                tonalCenterPitchClass: 2
             )
         )
 
         XCTAssertEqual(request.state.accompanimentStyle, "fugue")
         XCTAssertEqual(request.state.developmentStage, "stretto")
+        XCTAssertEqual(request.state.mode, "dorian")
+        XCTAssertEqual(request.state.tonalCenterPitchClass, 2)
         XCTAssertTrue(request.questions.activity.instructions.contains("motif-development"))
         XCTAssertTrue(request.questions.relationship.instructions.contains("temporal"))
         XCTAssertTrue(request.questions.motion.instructions.contains("contrapuntal"))
@@ -158,7 +162,9 @@ final class JevDecisionProviderTests: XCTestCase {
     private func makeInput(
         targetBarIndex: Int,
         style: AccompanimentStyle = .ambient,
-        developmentStage: MotifDevelopmentStage? = nil
+        developmentStage: MotifDevelopmentStage? = nil,
+        mode: MusicalMode? = nil,
+        tonalCenterPitchClass: UInt8? = nil
     ) -> BassDecisionInput {
         BassDecisionInput(
             state: MusicalState(
@@ -197,6 +203,8 @@ final class JevDecisionProviderTests: XCTestCase {
             ),
             style: style,
             developmentStage: developmentStage,
+            mode: mode,
+            tonalCenterPitchClass: tonalCenterPitchClass,
             isHeldChord: false,
             targetBarIndex: targetBarIndex
         )

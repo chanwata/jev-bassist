@@ -52,27 +52,21 @@
       position: relative;
       z-index: 2;
       min-height: 100vh;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      padding: clamp(14px, 1.6vw, 24px);
-      gap: clamp(12px, 1.6vw, 22px);
+      pointer-events: none;
     }
 
-    header, footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
+    header {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      opacity: .18;
+      pointer-events: auto;
+      transition: opacity .2s ease;
     }
 
-    .brand {
-      display: flex;
-      align-items: baseline;
-      gap: 9px;
-      font-size: 17px;
-      font-weight: 760;
-      letter-spacing: -.055em;
-    }
+    header:hover { opacity: .65; }
+
+    .brand { display: none; }
 
     .brand span, footer, .connection, .stream-labels, .phase, .eyebrow {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -89,59 +83,54 @@
     .connection {
       display: flex;
       align-items: center;
-      gap: 9px;
+      gap: 0;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 9px;
       font-weight: 600;
       letter-spacing: .08em;
     }
 
+    .connection span { display: none; }
+
     .dot {
-      width: 7px;
-      height: 7px;
+      width: 5px;
+      height: 5px;
       border-radius: 50%;
       background: #464844;
-      box-shadow: 0 0 0 5px rgba(255,255,255,.035);
+      box-shadow: none;
     }
 
     .connection.online .dot {
       background: var(--acid);
-      box-shadow: 0 0 0 5px var(--acid-soft), 0 0 18px rgba(200,255,69,.45);
+      box-shadow: 0 0 9px rgba(200,255,69,.35);
     }
 
     main {
-      display: grid;
-      grid-template-columns: minmax(250px, 360px) minmax(250px, 300px);
-      gap: clamp(28px, 5vw, 72px);
-      align-items: start;
-      justify-content: space-between;
-      width: 100%;
-      max-width: none;
-      margin: 0 auto;
+      min-height: 100vh;
     }
 
     .clock {
-      min-width: 0;
-      display: grid;
-      gap: 12px;
-      padding: 4px 0;
-      text-shadow: 0 2px 28px #080908;
+      position: fixed;
+      left: 14px;
+      bottom: 13px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      max-width: min(340px, calc(100vw - 28px));
+      opacity: .2;
+      pointer-events: auto;
+      transition: opacity .2s ease;
+      text-shadow: 0 1px 14px #080908;
     }
 
-    .stream-labels {
-      display: flex;
-      justify-content: space-between;
-      max-width: 360px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 650;
-      letter-spacing: .16em;
-    }
+    .clock:hover { opacity: .58; }
+
+    .stream-labels { display: none; }
 
     .stream-labels .companion { color: var(--acid); }
 
     .phase {
-      display: flex;
+      display: none;
       align-items: center;
       gap: 8px;
       color: var(--acid);
@@ -160,30 +149,35 @@
     .numbers {
       display: flex;
       align-items: center;
-      gap: clamp(22px, 4vw, 46px);
+      gap: 7px;
     }
 
-    .measure { min-width: 0; }
+    .measure {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+    }
 
     .eyebrow {
-      margin-bottom: 5px;
+      margin: 0;
       color: var(--muted);
       font-size: 11px;
       font-weight: 650;
-      letter-spacing: .16em;
+      letter-spacing: .1em;
     }
 
     .bar-number {
-      font-size: clamp(54px, 6vw, 84px);
-      font-weight: 720;
+      font-size: 12px;
+      font-weight: 600;
       font-variant-numeric: tabular-nums;
-      letter-spacing: -.085em;
-      line-height: .78;
+      letter-spacing: 0;
+      line-height: 1;
     }
 
     .pulse-wrap {
       position: relative;
-      width: clamp(76px, 7vw, 96px);
+      width: 24px;
       aspect-ratio: 1;
       display: grid;
       place-items: center;
@@ -195,14 +189,14 @@
       inset: 0;
       border-radius: 50%;
       background: conic-gradient(var(--acid) calc(var(--pulse, 0) * 1turn), var(--line) 0);
-      mask: radial-gradient(circle, transparent 65%, #000 66%);
-      -webkit-mask: radial-gradient(circle, transparent 65%, #000 66%);
+      mask: radial-gradient(circle, transparent 73%, #000 74%);
+      -webkit-mask: radial-gradient(circle, transparent 73%, #000 74%);
       transform: rotate(-90deg);
     }
 
     .beat-number {
-      font-size: clamp(38px, 4vw, 56px);
-      font-weight: 650;
+      font-size: 11px;
+      font-weight: 600;
       font-variant-numeric: tabular-nums;
       letter-spacing: -.07em;
       line-height: 1;
@@ -210,13 +204,13 @@
 
     .beat-strip {
       display: grid;
-      grid-template-columns: repeat(var(--beats, 4), minmax(34px, 1fr));
-      gap: 6px;
-      max-width: 360px;
+      grid-template-columns: repeat(var(--beats, 4), 18px);
+      gap: 3px;
+      max-width: 96px;
     }
 
     .beat-cell {
-      height: 4px;
+      height: 2px;
       overflow: hidden;
       border-radius: 99px;
       background: var(--line);
@@ -225,27 +219,37 @@
 
     .beat-cell.active {
       background: var(--acid);
-      box-shadow: 0 0 22px rgba(200,255,69,.25);
-      transform: scaleY(1.55);
+      box-shadow: 0 0 10px rgba(200,255,69,.25);
+      transform: scaleY(1.4);
     }
 
-    .caption {
-      max-width: 360px;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.45;
-    }
+    .caption { display: none; }
 
     .panel {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 14px;
-      background: var(--panel);
-      box-shadow: 0 20px 70px rgba(0,0,0,.32);
-      backdrop-filter: blur(22px);
-      width: 100%;
-      max-width: 300px;
-      justify-self: end;
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      width: 34px;
+      max-height: 30px;
+      overflow: hidden;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 4px;
+      background: transparent;
+      opacity: .12;
+      pointer-events: auto;
+      transition: width .18s ease, max-height .22s ease, opacity .2s ease, background .2s ease, border-color .2s ease;
+    }
+
+    .panel:hover, .panel:focus-within {
+      width: min(280px, calc(100vw - 20px));
+      max-height: 420px;
+      border-color: var(--line);
+      padding: 12px;
+      background: rgba(10, 11, 10, .74);
+      box-shadow: 0 16px 54px rgba(0,0,0,.28);
+      backdrop-filter: blur(20px);
+      opacity: .88;
     }
 
     .panel-title, .mix-heading, .mix-label {
@@ -256,6 +260,8 @@
 
     .panel-title { margin-bottom: 10px; }
 
+    .panel:not(:hover):not(:focus-within) .panel-title { display: none; margin: 0; }
+
     .panel > .field, .panel > .row { display: none; }
 
     .panel-title h2, .mix-heading h3 {
@@ -264,6 +270,11 @@
       letter-spacing: .1em;
       text-transform: uppercase;
     }
+
+    .panel:not(:hover):not(:focus-within) .note-readout,
+    .panel:not(:hover):not(:focus-within) .mixer,
+    .panel:not(:hover):not(:focus-within) .actions,
+    .panel:not(:hover):not(:focus-within) .hint { display: none; }
 
     .note-readout, .mix-value, .channel-tag {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -378,6 +389,20 @@
     .primary { background: var(--acid); color: #10120b; }
     .secondary { background: rgba(255,255,255,.07); color: var(--ink); }
 
+    .panel-toggle {
+      display: block;
+      width: 24px;
+      height: 20px;
+      margin: 0 0 5px auto;
+      padding: 0;
+      background: transparent;
+      color: var(--muted);
+      font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+    }
+
+    .panel-toggle:hover { transform: none; }
+
     .hint {
       min-height: 0;
       margin-top: 8px;
@@ -386,23 +411,12 @@
       line-height: 1.5;
     }
 
-    footer {
-      justify-content: flex-end;
-      color: #60625d;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: .07em;
-      line-height: 1.4;
-    }
-
-    footer span:first-child { display: none; }
+    footer { display: none; }
 
     @media (max-width: 820px) {
-      .shell { min-height: 100svh; }
-      main { grid-template-columns: 1fr; }
-      .panel { max-width: 300px; }
-      .numbers { justify-content: space-between; }
-      footer { flex-direction: column; align-items: flex-start; }
+      .shell, main { min-height: 100svh; }
+      .clock { left: 10px; bottom: 9px; }
+      header { top: 10px; left: 10px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -441,6 +455,7 @@
       </section>
 
       <aside class="panel">
+        <button class="panel-toggle" type="button" aria-label="Show session controls">···</button>
         <div class="panel-title">
           <h2>Session</h2>
           <span class="note-readout" id="noteReadout">CHORD — · NOTE —</span>
@@ -508,6 +523,7 @@
     const context = ui.visualizer.getContext('2d');
     const pendingEvents = [];
     const activeNotes = new Map();
+    const visualBursts = [];
     const volumeTimers = {};
     const membrane = {positions: [], velocities: [], bands: 15, nodes: 120};
     let state = null;
@@ -524,6 +540,7 @@
     let audioSpectrum = null;
     let audioEnergy = 0;
     let audioBrightness = 0;
+    let fieldFlash = 0;
 
     function resetMembrane() {
       membrane.positions = Array.from(
@@ -589,11 +606,13 @@
       setSlider(ui.companionVolume, ui.companionVolumeValue, next.companionVolume);
       ui.humanVolume.disabled = next.phase === 'stopped';
       ui.companionVolume.disabled = next.phase === 'stopped';
-      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style} after ${next.introBars} bars`;
+      const modalLabel = next.mode ? ` · ${next.tonalCenter ?? '?'} ${next.mode}` : '';
+      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style}${modalLabel} after ${next.introBars} bars`;
       const harmony = next.nextChord
         ? `${next.chord ?? '—'} → ${next.nextChord}`
         : (next.chord ?? '—');
-      ui.noteReadout.textContent = `CHORD ${harmony} · NOTE ${next.lastNote ?? '—'}`;
+      const center = next.mode ? ` · MODE ${next.tonalCenter ?? '?'} ${next.mode}` : '';
+      ui.noteReadout.textContent = `CHORD ${harmony}${center} · NOTE ${next.lastNote ?? '—'}`;
       ui.armButton.disabled = next.running || next.phase === 'stopped';
       ui.resetButton.disabled = next.phase === 'stopped';
       ui.armButton.textContent = next.running ? 'Running' : 'Start';
@@ -614,6 +633,17 @@
       const key = `${event.performer}:${event.note}`;
       if (event.kind === 'noteOn' && event.velocity > 0) {
         activeNotes.set(key, {...event, startedAt: now});
+        const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
+        const energy = Math.max(.15, event.velocity / 127) * performerGain(event.performer);
+        visualBursts.push({
+          startedAt: now,
+          x: (event.performer === 'human' ? .14 : .86) * viewportWidth,
+          y: (.15 + (1 - pitch) * .7) * viewportHeight,
+          energy,
+          performer: event.performer
+        });
+        if (visualBursts.length > 32) visualBursts.shift();
+        fieldFlash = Math.min(1, fieldFlash + energy * .72);
       } else {
         activeNotes.delete(key);
       }
@@ -676,14 +706,14 @@
       const energy = Math.max(.08, event.velocity / 127) * gain * (onset ? 1 : -.22);
       const direction = event.performer === 'human' ? 1 : -1;
 
-      for (let bandOffset = -3; bandOffset <= 3; bandOffset++) {
+      for (let bandOffset = -5; bandOffset <= 5; bandOffset++) {
         const targetBand = band + bandOffset;
         if (targetBand < 0 || targetBand >= membrane.bands) continue;
-        for (let nodeOffset = -12; nodeOffset <= 12; nodeOffset++) {
+        for (let nodeOffset = -24; nodeOffset <= 24; nodeOffset++) {
           const targetNode = node + nodeOffset;
           if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
-          const falloff = Math.exp(-Math.abs(nodeOffset) * .16 - Math.abs(bandOffset) * .5);
-          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * .62;
+          const falloff = Math.exp(-Math.abs(nodeOffset) * .075 - Math.abs(bandOffset) * .3);
+          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * 1.12;
         }
       }
       if (state?.style === 'fugue' && event.performer === 'companion' && onset) {
@@ -693,7 +723,7 @@
           const targetNode = mirrorNode + nodeOffset;
           if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
           const falloff = Math.exp(-Math.abs(nodeOffset) * .18);
-          membrane.velocities[mirrorBand][targetNode] -= energy * falloff * .38;
+          membrane.velocities[mirrorBand][targetNode] -= energy * falloff * .72;
         }
       }
     }
@@ -741,13 +771,52 @@
       membrane.velocities = nextVelocities;
       for (let band = 0; band < membrane.bands; band++) {
         for (let node = 1; node < membrane.nodes - 1; node++) {
-          membrane.velocities[band][node] = Math.max(-.8, Math.min(.8, membrane.velocities[band][node]));
+          membrane.velocities[band][node] = Math.max(-1.5, Math.min(1.5, membrane.velocities[band][node]));
           membrane.positions[band][node] = Math.max(
-            -2.4,
-            Math.min(2.4, membrane.positions[band][node] + membrane.velocities[band][node] * step)
+            -3.8,
+            Math.min(3.8, membrane.positions[band][node] + membrane.velocities[band][node] * step)
           );
         }
       }
+    }
+
+    function drawBursts(now) {
+      fieldFlash *= .9;
+      if (fieldFlash > .01) {
+        context.fillStyle = `rgba(200,255,69,${fieldFlash * .16})`;
+        context.fillRect(0, 0, viewportWidth, viewportHeight);
+      }
+      context.save();
+      context.globalCompositeOperation = 'screen';
+      for (let index = visualBursts.length - 1; index >= 0; index--) {
+        const burst = visualBursts[index];
+        const age = now - burst.startedAt;
+        if (age > 1800) {
+          visualBursts.splice(index, 1);
+          continue;
+        }
+        const progress = age / 1800;
+        const alpha = (1 - progress) * burst.energy;
+        const radius = 24 + progress * Math.max(viewportWidth, viewportHeight) * .72;
+        const color = burst.performer === 'human' ? '242,240,232' : '200,255,69';
+        const glow = context.createRadialGradient(
+          burst.x, burst.y, 0,
+          burst.x, burst.y, Math.max(1, radius * .55)
+        );
+        glow.addColorStop(0, `rgba(${color},${alpha * .28})`);
+        glow.addColorStop(.35, `rgba(${color},${alpha * .12})`);
+        glow.addColorStop(1, `rgba(${color},0)`);
+        context.fillStyle = glow;
+        context.fillRect(0, 0, viewportWidth, viewportHeight);
+        context.strokeStyle = `rgba(${color},${alpha * .68})`;
+        context.lineWidth = 1.5 + burst.energy * 5 * (1 - progress);
+        context.shadowColor = `rgba(${color},${alpha})`;
+        context.shadowBlur = 22 + burst.energy * 38;
+        context.beginPath();
+        context.arc(burst.x, burst.y, radius, 0, Math.PI * 2);
+        context.stroke();
+      }
+      context.restore();
     }
 
     function drawMembrane(now, beatProgress, absoluteBeat) {
@@ -758,13 +827,14 @@
       const fade = .13 - resonance * .075;
       context.fillStyle = `rgba(8,9,8,${Math.max(.055, fade)})`;
       context.fillRect(0, 0, viewportWidth, viewportHeight);
+      drawBursts(now);
 
       const gradient = context.createLinearGradient(0, 0, viewportWidth, 0);
       gradient.addColorStop(0, `rgba(242,240,232,${.22 + activity * .28})`);
       gradient.addColorStop(.48, `rgba(242,240,232,${.36 + memory * .34})`);
       gradient.addColorStop(1, `rgba(200,255,69,${.28 + memory * .48})`);
       context.strokeStyle = gradient;
-      context.lineWidth = 1.1 + activity * 2.1;
+      context.lineWidth = 1.6 + activity * 3.2;
       context.shadowColor = `rgba(200,255,69,${.16 + activity * .2})`;
       context.shadowBlur = 8 + activity * 18;
 
@@ -777,8 +847,8 @@
         for (let node = 0; node < membrane.nodes; node++) {
           const x = node / (membrane.nodes - 1) * viewportWidth;
           const field = membrane.positions[band][node];
-          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 8;
-          const y = baseline + field * viewportHeight * (.10 + tension * .08) + drift;
+          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 14;
+          const y = baseline + field * viewportHeight * (.16 + tension * .12) + drift;
           if (node === 0) context.moveTo(x, y);
           else context.lineTo(x, y);
         }

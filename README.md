@@ -111,6 +111,8 @@ swift run jev-bassist jam \
 
 Common major, minor, dominant-seventh, major-seventh, minor-seventh, and diminished symbols are accepted, including sharps and flats. The current engine reduces seventh chords to their major/minor triad family, then uses the following chord as the target for restrained fills and chromatic approaches. Without `--progression`, live chord detection remains available as an experimental one-bar response mode.
 
+The fugue style is the exception: it rejects `--progression` and requires one modal color such as `--mode dorian`. Its tonal center is inferred from the locked subject and remains stable for the complete eight-bar cycle.
+
 The M3 rule policy is intentionally conservative:
 
 - no usable chord means rest;
@@ -186,13 +188,13 @@ swift run jev-bassist jam \
   --human-volume 100 \
   --companion-volume 74 \
   --intro-bars 2 \
-  --progression "Dm7,G7,Cmaj7,A7" \
   --style fugue \
+  --mode dorian \
   --brain jev \
   --ui
 ```
 
-Play a concise subject, then leave roughly a beat of room for the first answer. The deterministic form moves through `answer`, `sequence`, `inversion`, `fragmentation`, `augmentation`, `diminution`, `stretto`, and `return`. The final bar restates the complete original contour even when the bounded Jev activity decision requests rest. Jev still controls density, temporal attitude, secondary motion, and cadence inside each formal stage; it cannot discard the subject or select individual notes.
+Play a concise subject, then leave roughly a beat of room for the first answer. The engine infers the subject's tonal center, holds that center and the selected mode for the complete cycle, and derives each stage's triad locally. The deterministic form moves through `answer`, `sequence`, `inversion`, `fragmentation`, `augmentation`, `diminution`, `stretto`, and `return`. The final bar restates the complete original contour even when the bounded Jev activity decision requests rest. Jev still controls density, temporal attitude, secondary motion, and cadence inside each formal stage; it cannot discard the subject or select individual notes.
 
 During the cycle, keep playing naturally. A new bar containing at least three notes is remembered as a possible next subject, and the most recent candidate takes over only after the current subject has returned. A short pluck, organ, harpsichord-like patch, or restrained strings will keep overlapping entries clearer than a long pad. The terminal log and browser header show the current development stage.
 
@@ -217,7 +219,7 @@ swift run jev-bassist jam \
 
 The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Click **Start** on the downbeat. That single action starts the Swift/CoreMIDI bar clock and the browser display together; the browser does not open MIDI itself and does not run a second independent clock. **Stop** ends the live process safely. You can also press `Return` in Terminal.
 
-The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. The visual field is a single simulated membrane driven by the combined MIDI timeline. Human notes disturb it strongly from the left and companion notes return from the right; pitch selects the affected band, while velocity and channel volume control force. Displacement, glow, and afterimages are deliberately exaggerated so attacks remain legible at performance distance. Fugue answers also create a mirrored secondary disturbance, making imitation visible across the field. In memory and fugue modes the engine publishes four slow expression values: remembered strength controls coupling, tension changes stiffness, activity changes line weight, and resonance controls damping and afterimage length. No microphone permission or audio stream is required.
+The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. The visual field is a single simulated membrane driven by the combined MIDI timeline. Human notes strike it from the left and companion notes return from the right; every attack launches an expanding luminous shockwave as well as a broad membrane displacement. Velocity and channel volume control the flash, wave radius, deformation, and persistence. Fugue answers also create a mirrored secondary disturbance, making imitation visible across the entire field. In memory and fugue modes the engine publishes four slow expression values: remembered strength controls coupling, tension changes stiffness, activity changes line weight, and resonance controls damping and afterimage length. No microphone permission or audio stream is required.
 
 For the membrane to follow the actual mixed sound and reverb as well, connect the JD-Xi audio outputs to the UR22mkII inputs, select the UR22mkII as the browser or macOS input, and click **Audio**. Chrome will request input permission once. The page analyzes only RMS energy and spectral brightness inside the browser; it does not play, upload, or send the audio to Swift. Leave Audio off when only MIDI response is desired.
 
