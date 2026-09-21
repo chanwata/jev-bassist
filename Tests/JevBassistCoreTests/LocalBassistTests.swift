@@ -545,25 +545,41 @@ final class LocalBassistTests: XCTestCase {
             ),
             decisionProvider: ConstantDecisionProvider(decision: decision)
         )
-        for (offset, note) in [(UInt64(0), UInt8(60)), (250_000, 62), (500_000, 64)] {
+        let firstSubjectEvents: [(UInt64, MIDIEvent.Kind, UInt8, UInt8)] = [
+            (0, .noteOn, 60, 84),
+            (120_000, .noteOff, 60, 0),
+            (250_000, .noteOn, 62, 84),
+            (370_000, .noteOff, 62, 0),
+            (500_000, .noteOn, 64, 84),
+            (620_000, .noteOff, 64, 0)
+        ]
+        for (offset, kind, note, velocity) in firstSubjectEvents {
             _ = try engine.ingest(SessionMIDIEvent(
                 offsetMicroseconds: offset,
                 hostTime: offset,
                 channel: 1,
-                kind: .noteOn,
+                kind: kind,
                 note: note,
-                velocity: 84
+                velocity: velocity
             ))
         }
         var plans = try engine.advance(through: 2_000_000).plans
-        for (offset, note) in [(UInt64(2_100_000), UInt8(65)), (2_350_000, 68), (2_600_000, 72)] {
+        let secondSubjectEvents: [(UInt64, MIDIEvent.Kind, UInt8, UInt8)] = [
+            (2_100_000, .noteOn, 65, 82),
+            (2_220_000, .noteOff, 65, 0),
+            (2_350_000, .noteOn, 68, 82),
+            (2_470_000, .noteOff, 68, 0),
+            (2_600_000, .noteOn, 72, 82),
+            (2_720_000, .noteOff, 72, 0)
+        ]
+        for (offset, kind, note, velocity) in secondSubjectEvents {
             _ = try engine.ingest(SessionMIDIEvent(
                 offsetMicroseconds: offset,
                 hostTime: offset,
                 channel: 1,
-                kind: .noteOn,
+                kind: kind,
                 note: note,
-                velocity: 82
+                velocity: velocity
             ))
         }
         for boundary in 2...9 {
@@ -718,15 +734,23 @@ final class LocalBassistTests: XCTestCase {
                 style: .memory
             )
         )
-        for (offset, note) in [(UInt64(0), UInt8(60)), (125_000, 64), (250_000, 67)] {
+        let motifEvents: [(UInt64, MIDIEvent.Kind, UInt8, UInt8)] = [
+            (0, .noteOn, 60, 84),
+            (80_000, .noteOff, 60, 0),
+            (125_000, .noteOn, 64, 84),
+            (205_000, .noteOff, 64, 0),
+            (250_000, .noteOn, 67, 84),
+            (330_000, .noteOff, 67, 0)
+        ]
+        for (offset, kind, note, velocity) in motifEvents {
             _ = try engine.ingest(
                 SessionMIDIEvent(
                     offsetMicroseconds: offset,
                     hostTime: offset,
                     channel: 1,
-                    kind: .noteOn,
+                    kind: kind,
                     note: note,
-                    velocity: 84
+                    velocity: velocity
                 )
             )
         }

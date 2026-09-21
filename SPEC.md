@@ -143,6 +143,16 @@ The primary human evaluation is a short rating of “this felt like another play
 - keep this milestone observational: it records the current fixed eight-stage fugue but does not describe that behavior as conversational;
 - use the trace foundation for duration-aware phrase memory, short-horizon scheduling, and a later context-driven response engine.
 
+### M12 P1: duration-aware motif memory
+
+- pair Note On/Off events on normalized session time, including overlapping retriggers of the same channel/note;
+- mark releases inferred at session end instead of presenting them as observed duration;
+- finalize phrases from tempo-relative adaptive silence and recent onset spacing, not bar boundaries;
+- preserve cross-bar phrasing, relative onset, duration, rests, velocity accents, and characteristic intervals in an immutable bounded motif;
+- group simultaneous attacks and reject low-confidence chord extraction as a multi-note melody subject;
+- add performed notes, phrase observations, diagnostics, and motifs to evaluation trace v2 while continuing to decode trace v1;
+- project a finalized motif into the legacy generator without yet replacing the fixed eight-stage fugue or whole-bar scheduler.
+
 ## Out of scope for the early MVP
 
 - audio transcription;

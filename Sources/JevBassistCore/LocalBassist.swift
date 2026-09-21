@@ -11,11 +11,59 @@ public struct HumanPhraseNote: Codable, Equatable, Sendable {
     public let note: UInt8
     public let velocity: UInt8
     public let positionBeats: Double
+    public let durationBeats: Double
+    public let restBeforeBeats: Double
+    public let accent: Double
+    public let releaseWasInferred: Bool
 
-    public init(note: UInt8, velocity: UInt8, positionBeats: Double) {
+    public init(
+        note: UInt8,
+        velocity: UInt8,
+        positionBeats: Double,
+        durationBeats: Double = 0.5,
+        restBeforeBeats: Double = 0,
+        accent: Double = 1,
+        releaseWasInferred: Bool = false
+    ) {
         self.note = note
         self.velocity = velocity
         self.positionBeats = positionBeats
+        self.durationBeats = durationBeats
+        self.restBeforeBeats = restBeforeBeats
+        self.accent = accent
+        self.releaseWasInferred = releaseWasInferred
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case note
+        case velocity
+        case positionBeats
+        case durationBeats
+        case restBeforeBeats
+        case accent
+        case releaseWasInferred
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            note: try container.decode(UInt8.self, forKey: .note),
+            velocity: try container.decode(UInt8.self, forKey: .velocity),
+            positionBeats: try container.decode(Double.self, forKey: .positionBeats),
+            durationBeats: try container.decodeIfPresent(
+                Double.self,
+                forKey: .durationBeats
+            ) ?? 0.5,
+            restBeforeBeats: try container.decodeIfPresent(
+                Double.self,
+                forKey: .restBeforeBeats
+            ) ?? 0,
+            accent: try container.decodeIfPresent(Double.self, forKey: .accent) ?? 1,
+            releaseWasInferred: try container.decodeIfPresent(
+                Bool.self,
+                forKey: .releaseWasInferred
+            ) ?? false
+        )
     }
 }
 
@@ -1584,10 +1632,25 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
 public struct LocalBassistUpdate: Equatable, Sendable {
     public let snapshots: [MusicalStateSnapshot]
     public let plans: [BassBarPlan]
+    public let performedNotes: [PerformedNote]
+    public let phraseObservations: [PhraseObservation]
+    public let motifs: [Motif]
+    public let performanceDiagnostics: [PerformanceTrackerDiagnostic]
 
-    public init(snapshots: [MusicalStateSnapshot], plans: [BassBarPlan]) {
+    public init(
+        snapshots: [MusicalStateSnapshot],
+        plans: [BassBarPlan],
+        performedNotes: [PerformedNote] = [],
+        phraseObservations: [PhraseObservation] = [],
+        motifs: [Motif] = [],
+        performanceDiagnostics: [PerformanceTrackerDiagnostic] = []
+    ) {
         self.snapshots = snapshots
         self.plans = plans
+        self.performedNotes = performedNotes
+        self.phraseObservations = phraseObservations
+        self.motifs = motifs
+        self.performanceDiagnostics = performanceDiagnostics
     }
 }
 
@@ -1676,7 +1739,10 @@ public struct LocalBassistEngine: Sendable {
     private var barsWithoutChord = 0
     private var previousBassNote: UInt8?
     private var previousPhraseNotes: [UInt8] = []
-    private var phraseNotesByBar: [Int: [HumanPhraseNote]] = [:]
+    private var performanceTracker: PerformanceTracker
+    private var phraseSegmenter: PhraseSegmenter
+    private var motifMemory = MotifMemory()
+    private var pendingMotifs: [Motif] = []
     private var recentPhraseMemory: HumanPhraseMemory?
     private var fugueSubjectMemory: HumanPhraseMemory?
     private var pendingFugueSubject: HumanPhraseMemory?
@@ -1700,20 +1766,65 @@ public struct LocalBassistEngine: Sendable {
         fuguePhraseGenerator = FuguePhraseGenerator(
             outputChannel: configuration.outputChannel
         )
+        performanceTracker = PerformanceTracker()
+        phraseSegmenter = PhraseSegmenter(
+            musicalStateConfiguration: configuration.musicalState
+        )
     }
 
     public mutating func ingest(_ event: SessionMIDIEvent) throws -> LocalBassistUpdate {
+        var nextPerformanceTracker = performanceTracker
+        var nextPhraseSegmenter = phraseSegmenter
+        let observationsBeforeEvent = try nextPhraseSegmenter.observeEvent(
+            at: event.offsetMicroseconds,
+            hasActiveNotes: nextPerformanceTracker.hasActiveNotes
+        )
+        let performance = try nextPerformanceTracker.ingest(event)
+        try nextPhraseSegmenter.ingest(completedNotes: performance.completedNotes)
         let snapshots = try tracker.ingest(event)
-        remember(event)
-        return makeUpdate(from: snapshots)
+        performanceTracker = nextPerformanceTracker
+        phraseSegmenter = nextPhraseSegmenter
+        let motifs = remember(observationsBeforeEvent)
+        return Self.enriching(
+            makeUpdate(from: snapshots),
+            performance: performance,
+            observations: observationsBeforeEvent,
+            motifs: motifs
+        )
     }
 
     public mutating func advance(through offsetMicroseconds: UInt64) throws -> LocalBassistUpdate {
-        makeUpdate(from: try tracker.advance(through: offsetMicroseconds))
+        var nextPhraseSegmenter = phraseSegmenter
+        let observations = try nextPhraseSegmenter.advance(
+            through: offsetMicroseconds,
+            hasActiveNotes: performanceTracker.hasActiveNotes
+        )
+        let snapshots = try tracker.advance(through: offsetMicroseconds)
+        phraseSegmenter = nextPhraseSegmenter
+        let motifs = remember(observations)
+        return Self.enriching(
+            makeUpdate(from: snapshots),
+            observations: observations,
+            motifs: motifs
+        )
     }
 
     public mutating func finish(through offsetMicroseconds: UInt64) throws -> LocalBassistUpdate {
-        makeUpdate(from: try tracker.finish(through: offsetMicroseconds))
+        var nextPerformanceTracker = performanceTracker
+        var nextPhraseSegmenter = phraseSegmenter
+        let performance = try nextPerformanceTracker.finish(through: offsetMicroseconds)
+        try nextPhraseSegmenter.ingest(completedNotes: performance.completedNotes)
+        let observations = try nextPhraseSegmenter.finish(through: offsetMicroseconds)
+        let snapshots = try tracker.finish(through: offsetMicroseconds)
+        performanceTracker = nextPerformanceTracker
+        phraseSegmenter = nextPhraseSegmenter
+        let motifs = remember(observations)
+        return Self.enriching(
+            makeUpdate(from: snapshots),
+            performance: performance,
+            observations: observations,
+            motifs: motifs
+        )
     }
 
     public func cancelPendingDecisions() {
@@ -1890,36 +2001,29 @@ public struct LocalBassistEngine: Sendable {
         return LocalBassistUpdate(snapshots: snapshots, plans: plans)
     }
 
-    private mutating func remember(_ event: SessionMIDIEvent) {
-        guard event.kind == .noteOn, event.velocity > 0 else {
-            return
+    private mutating func remember(_ observations: [PhraseObservation]) -> [Motif] {
+        observations.compactMap { observation in
+            guard let motif = motifMemory.remember(
+                observation,
+                musicalStateConfiguration: configuration.musicalState
+            ) else {
+                return nil
+            }
+            pendingMotifs.append(motif)
+            return motif
         }
-        let barLength = configuration.musicalState.boundaryMicroseconds(
-            afterBeats: configuration.musicalState.beatsPerBar
-        )
-        let barIndex = Int(event.offsetMicroseconds / barLength)
-        let barStart = UInt64(barIndex) * barLength
-        let beatLength = 60_000_000 / configuration.musicalState.tempoBPM
-        let position = Double(event.offsetMicroseconds - barStart) / beatLength
-        var notes = phraseNotesByBar[barIndex, default: []]
-        if notes.count < 16 {
-            notes.append(
-                HumanPhraseNote(
-                    note: event.note,
-                    velocity: event.velocity,
-                    positionBeats: position
-                )
-            )
-        }
-        phraseNotesByBar[barIndex] = notes
     }
 
     private mutating func phraseMemory(
         for snapshot: MusicalStateSnapshot
     ) -> HumanPhraseMemory? {
-        let captured = phraseNotesByBar.removeValue(forKey: snapshot.barIndex) ?? []
-        if !captured.isEmpty {
-            let memory = HumanPhraseMemory(notes: captured, ageBars: 0)
+        let eligibleCount = pendingMotifs.prefix {
+            $0.finalizedAtMicroseconds <= snapshot.endMicroseconds
+        }.count
+        if eligibleCount > 0 {
+            let captured = pendingMotifs[eligibleCount - 1]
+            pendingMotifs.removeFirst(eligibleCount)
+            let memory = captured.legacyMemory()
             recentPhraseMemory = memory
             return memory
         }
@@ -1932,6 +2036,22 @@ public struct LocalBassistEngine: Sendable {
         )
         self.recentPhraseMemory = aged.ageBars <= 2 ? aged : nil
         return aged.ageBars <= 2 ? aged : nil
+    }
+
+    private static func enriching(
+        _ update: LocalBassistUpdate,
+        performance: PerformanceTrackerUpdate = PerformanceTrackerUpdate(),
+        observations: [PhraseObservation] = [],
+        motifs: [Motif] = []
+    ) -> LocalBassistUpdate {
+        LocalBassistUpdate(
+            snapshots: update.snapshots,
+            plans: update.plans,
+            performedNotes: performance.completedNotes,
+            phraseObservations: observations,
+            motifs: motifs,
+            performanceDiagnostics: performance.diagnostics
+        )
     }
 
     private mutating func updateFugueDevelopment(
