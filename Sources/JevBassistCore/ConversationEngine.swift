@@ -680,21 +680,33 @@ public struct ResponseCandidateGenerator: Sendable {
         let contour = comparisonCount == 0
             ? 0.5
             : Double(contourMatches) / Double(comparisonCount)
-        let intervalSimilarity = comparisonCount == 0 ? 0.5 : zip(
-            generatedIntervals.prefix(comparisonCount),
-            sourceIntervals.prefix(comparisonCount)
-        ).map { generated, original in
-            max(0, 1 - Double(abs(abs(generated) - abs(original))) / 7)
-        }.reduce(0, +) / Double(comparisonCount)
+        let intervalSimilarity: Double
+        if comparisonCount == 0 {
+            intervalSimilarity = 0.5
+        } else {
+            var total = 0.0
+            for index in 0..<comparisonCount {
+                let generated = generatedIntervals[index]
+                let original = sourceIntervals[index]
+                let difference = abs(abs(generated) - abs(original))
+                total += max(0, 1 - Double(difference) / 7)
+            }
+            intervalSimilarity = total / Double(comparisonCount)
+        }
         let sourceRhythm = intervals(source.map { Int(($0.relativeOnsetBeats * 96).rounded()) })
         let generatedRhythm = intervals(notes.map { Int(($0.relativeOnsetBeats * 96).rounded()) })
         let rhythmCount = min(sourceRhythm.count, generatedRhythm.count)
-        let rhythm = rhythmCount == 0 ? 0.7 : zip(
-            sourceRhythm.prefix(rhythmCount),
-            generatedRhythm.prefix(rhythmCount)
-        ).map { original, generated in
-            max(0, 1 - Double(abs(original - generated)) / 96)
-        }.reduce(0, +) / Double(rhythmCount)
+        let rhythm: Double
+        if rhythmCount == 0 {
+            rhythm = 0.7
+        } else {
+            var total = 0.0
+            for index in 0..<rhythmCount {
+                let difference = abs(sourceRhythm[index] - generatedRhythm[index])
+                total += max(0, 1 - Double(difference) / 96)
+            }
+            rhythm = total / Double(rhythmCount)
+        }
         let recognition = contour * 0.5 + intervalSimilarity * 0.3 + rhythm * 0.2
         let duration = max(0.25, notes.map {
             $0.relativeOnsetBeats + $0.durationBeats
