@@ -284,7 +284,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             ]
         ),
         motion: JevChoiceQuestion(
-            instructions: "Choose a secondary contrapuntal inflection. The local eight-bar form already controls answer, sequence, inversion, fragmentation, augmentation, diminution, stretto, and return.",
+            instructions: "Choose a secondary contrapuntal inflection. The local conversation engine protects the motif, mode, timing, and eventual return.",
             criteria: [
                 "root": "Give a real answer on the dominant while preserving the subject intervals.",
                 "step": "Compress wide subject intervals into smoother stepwise motion.",

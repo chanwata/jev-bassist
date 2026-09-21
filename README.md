@@ -29,7 +29,7 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
 - render the same bounded decisions as one quiet, sustained ambient voicing per bar;
 - remember a human motif and return a delayed, locally transformed trace that fades over two silent bars;
-- preserve a short human subject through an eight-bar arc of answer, transformation, climax, and return;
+- preserve a short human subject through context-selected answers and an explicit return;
 - mix the human and companion parts independently with MIDI Channel Volume controls;
 - render both MIDI performances as one strongly reactive, beat-synchronized membrane;
 - flush pending output and silence the selected channel when a live session stops.
@@ -112,7 +112,7 @@ swift run jev-bassist jam \
 
 Common major, minor, dominant-seventh, major-seventh, minor-seventh, and diminished symbols are accepted, including sharps and flats. The current engine reduces seventh chords to their major/minor triad family, then uses the following chord as the target for restrained fills and chromatic approaches. Without `--progression`, live chord detection remains available as an experimental one-bar response mode.
 
-The fugue style is the exception: it rejects `--progression` and requires one modal color such as `--mode dorian`. Its tonal center is inferred from the locked subject and remains stable for the complete eight-bar cycle.
+The fugue style is the exception: it rejects `--progression` and requires one modal color such as `--mode dorian`. Its tonal center is inferred from the captured origin motif and remains stable while later phrases shape contextual transformations.
 
 The M3 rule policy is intentionally conservative:
 
@@ -177,7 +177,7 @@ Activity selects one, three, or four representative notes rather than adding a g
 
 ## Use the fugue ensemble style
 
-`--style fugue` treats the first qualifying three-to-eight-note idea as a subject and keeps it intact for a complete eight-bar development cycle. Material played during that cycle becomes a candidate for the next cycle instead of erasing the active subject. The companion therefore develops one recognizable idea over time rather than replacing it every bar.
+`--style fugue` treats the first qualifying idea as an immutable origin. Each later completed phrase changes the context used to choose a one-voice sequence, inversion, fragmentation, augmentation, or return. The companion therefore develops one recognizable idea from the live exchange rather than advancing through a bar-counted form.
 
 ```bash
 swift run jev-bassist jam \
@@ -341,6 +341,8 @@ For `--style fugue`, a finalized motif now enters the local conversation engine 
 
 After the first echo, development is selected from the live relationship rather than a stage clock. Dense playing invites augmentation, register displacement invites a modal sequence, close contour repetition invites inversion, and longer material can be fragmented. Each answer records its motif lineage. Once accumulated transformations cross a conservative divergence limit, the engine restates the original captured motif and begins a new arc without mutating that origin.
 
+With `--brain jev`, the conversation engine sends one request only after a motif is complete. The request contains musical context plus the IDs and scores of the bounded local candidates; Jev cannot invent notes or MIDI events. The live queue polls the prepared result without waiting. A valid answer reserves a future shared beat, while timeout, low confidence, malformed output, an unknown ID, or a superseded revision selects the deterministic local candidate. Traces are written to stderr as `jev-conversation-trace` JSON without the API key.
+
 The evaluation command records this conversation path deterministically. The next milestones add context-driven development and original-subject return, then compare local and Jev candidate selection on the same traces.
 
 ## Build and test
@@ -354,7 +356,7 @@ Pure MIDI decoding, fixture validation, replay, deterministic ensemble evaluatio
 
 ## Planned path
 
-1. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
-2. Carry motif lineage and confirmed scheduler events into the performance visual.
+1. Carry motif lineage and confirmed scheduler events into the performance visual.
+2. Compare local and Jev candidate selection in repeated live sessions, reporting network timing separately from the intentional conversational breath.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.

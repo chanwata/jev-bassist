@@ -530,6 +530,17 @@ private func log(_ trace: JevDecisionTrace) {
     FileHandle.standardError.write(Data("\n".utf8))
 }
 
+private func log(_ trace: JevConversationTrace) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    guard let data = try? encoder.encode(trace) else { return }
+    jevTraceLock.lock()
+    defer { jevTraceLock.unlock() }
+    FileHandle.standardError.write(Data("jev-conversation-trace ".utf8))
+    FileHandle.standardError.write(data)
+    FileHandle.standardError.write(Data("\n".utf8))
+}
+
 private func fileURL(for path: String) -> URL {
     URL(
         fileURLWithPath: path,
@@ -708,9 +719,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             beatsPerBar: options.beatsPerBar
         )
         let decisionProvider: any BassDecisionProvider
+        let conversationDecisionProvider: any ConversationDecisionProvider
         switch options.brain {
         case .rules:
             decisionProvider = RuleBasedBassDecisionProvider()
+            conversationDecisionProvider = LocalConversationDecisionProvider()
         case .jev:
             guard let apiKey = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"],
                   !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -727,6 +740,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 deadlineMilliseconds: deadlineMilliseconds,
                 traceHandler: log
             )
+            conversationDecisionProvider = JevConversationDecisionProvider(
+                apiKey: apiKey,
+                deadlineMilliseconds: min(350, deadlineMilliseconds),
+                traceHandler: log
+            )
         }
         engine = LocalBassistEngine(
             configuration: try LocalBassistConfiguration(
@@ -737,7 +755,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 style: options.style,
                 mode: options.mode
             ),
-            decisionProvider: decisionProvider
+            decisionProvider: decisionProvider,
+            conversationDecisionProvider: conversationDecisionProvider
         )
         try output.sendControlChange(
             controller: 7,
