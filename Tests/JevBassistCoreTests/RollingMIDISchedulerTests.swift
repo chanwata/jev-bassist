@@ -37,6 +37,7 @@ final class RollingMIDISchedulerTests: XCTestCase {
         XCTAssertEqual(committed.map(\.message.kind), [.noteOn])
         XCTAssertEqual(cancellation.canceledNoteIDs.count, 1)
         XCTAssertEqual(cancellation.canceledEventIDs.count, 2)
+        XCTAssertEqual(cancellation.canceledRevisions, [1])
         XCTAssertEqual(remaining.map(\.message.kind), [.noteOff])
         XCTAssertEqual(remaining.map(\.message.note), [60])
     }

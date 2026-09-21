@@ -46,7 +46,7 @@
       pointer-events: none;
     }
 
-    button, input { font: inherit; }
+    button, input, select { font: inherit; }
 
     .shell {
       position: relative;
@@ -304,6 +304,17 @@
       color: var(--ink);
     }
 
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 9px;
+      outline: none;
+      background: rgba(255,255,255,.035);
+      color: var(--ink);
+      font-size: 11px;
+    }
+
     .row {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -495,6 +506,12 @@
             </div>
             <input type="range" class="companion-slider" id="companionVolume" min="0" max="127" value="72" disabled aria-label="Jev companion volume">
           </div>
+          <div class="mix-channel">
+            <label for="audioInput">Visual audio input</label>
+            <select id="audioInput" aria-label="Audio input used only for the visual field">
+              <option value="">System default</option>
+            </select>
+          </div>
         </section>
 
         <div class="actions">
@@ -517,17 +534,17 @@
       'visualizer','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
       'beatStrip','caption','midiInput','bpm','beats','intro','armButton','audioButton','resetButton','hint',
       'noteReadout','footerTiming','humanChannel','companionChannel','humanVolume',
-      'companionVolume','humanVolumeValue','companionVolumeValue'
+      'companionVolume','humanVolumeValue','companionVolumeValue','audioInput'
     ].map(id => [id, document.getElementById(id)]));
 
     const context = ui.visualizer.getContext('2d');
     const pendingEvents = [];
     const activeNotes = new Map();
     const visualBursts = [];
-    const lineageSignals = [];
-    const lineageForms = new Map();
+    const phraseFields = new Map();
+    const humanTrace = [];
     const volumeTimers = {};
-    const membrane = {positions: [], velocities: [], bands: 15, nodes: 120};
+    const membrane = {positions: [], velocities: [], bands: 9, nodes: 108};
     let state = null;
     let renderedBeat = -1;
     let renderedBeatsPerBar = 0;
@@ -645,24 +662,41 @@
           performer: event.performer
         });
         if (visualBursts.length > 32) visualBursts.shift();
-        fieldFlash = Math.min(1, fieldFlash + energy * (event.performer === 'human' ? .9 : 1.25));
+        fieldFlash = Math.min(1, fieldFlash + energy * (event.performer === 'human' ? .45 : .62));
+        if (event.performer === 'human') {
+          humanTrace.push({startedAt: now, note: event.note, energy});
+          if (humanTrace.length > 48) humanTrace.shift();
+        }
         if (event.performer === 'companion' && event.originMotifID != null) {
           const relationship = event.relationship ?? 'echo';
           const generation = event.generation ?? 0;
-          const signal = {
+          const response = event.responseID ?? event.id;
+          const existing = phraseFields.get(response);
+          const signal = existing ?? {
             startedAt: now,
+            lastAt: now,
             origin: event.originMotifID,
-            response: event.responseID ?? event.id,
+            response,
             parent: event.parentResponseID,
             generation,
             relationship,
-            pitch,
-            energy
+            energy: 0,
+            revealed: 0,
+            originGesture: event.originGesture ?? [],
+            sourceGesture: event.sourceGesture ?? [],
+            responseGesture: event.responseGesture ?? []
           };
-          lineageSignals.push(signal);
-          if (lineageSignals.length > 40) lineageSignals.shift();
-          lineageForms.set(event.originMotifID, signal);
-          if (relationship === 'originalReturn') fieldFlash = 1;
+          signal.lastAt = now;
+          signal.energy = Math.max(signal.energy * .72, energy);
+          signal.revealed = Math.min(
+            signal.responseGesture.length,
+            signal.revealed + 1
+          );
+          phraseFields.set(response, signal);
+          while (phraseFields.size > 8) {
+            phraseFields.delete(phraseFields.keys().next().value);
+          }
+          if (relationship === 'originalReturn') fieldFlash = Math.max(fieldFlash, .55);
         }
       } else {
         activeNotes.delete(key);
@@ -677,6 +711,7 @@
       for (const [key, note] of activeNotes) {
         if (now - note.startedAt > 15000) activeNotes.delete(key);
       }
+      while (humanTrace.length && now - humanTrace[0].startedAt > 9000) humanTrace.shift();
     }
 
     function performerGain(performer) {
@@ -736,16 +771,6 @@
           membrane.velocities[targetBand][targetNode] += direction * energy * falloff * 1.12;
         }
       }
-      if (state?.style === 'fugue' && event.performer === 'companion' && onset) {
-        const mirrorBand = membrane.bands - 1 - band;
-        const mirrorNode = Math.round((1 - x) * (membrane.nodes - 1));
-        for (let nodeOffset = -9; nodeOffset <= 9; nodeOffset++) {
-          const targetNode = mirrorNode + nodeOffset;
-          if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
-          const falloff = Math.exp(-Math.abs(nodeOffset) * .18);
-          membrane.velocities[mirrorBand][targetNode] -= energy * falloff * .72;
-        }
-      }
     }
 
     function evolveMembrane(now, deltaSeconds) {
@@ -800,10 +825,11 @@
       }
     }
 
-    function drawBursts(now) {
-      fieldFlash *= .9;
+    function drawBursts(now, deltaSeconds) {
+      const frameDecay = Math.pow(.08, Math.min(.1, deltaSeconds));
+      fieldFlash *= Number.isFinite(frameDecay) ? frameDecay : .9;
       if (fieldFlash > .01) {
-        context.fillStyle = `rgba(200,255,69,${fieldFlash * .16})`;
+        context.fillStyle = `rgba(225,255,179,${fieldFlash * .1})`;
         context.fillRect(0, 0, viewportWidth, viewportHeight);
       }
       context.save();
@@ -811,113 +837,187 @@
       for (let index = visualBursts.length - 1; index >= 0; index--) {
         const burst = visualBursts[index];
         const age = now - burst.startedAt;
-        if (age > 1800) {
+        if (age > 1050) {
           visualBursts.splice(index, 1);
           continue;
         }
-        const progress = age / 1800;
-        const alpha = (1 - progress) * burst.energy;
-        const radius = 24 + progress * Math.max(viewportWidth, viewportHeight) * .72;
+        const progress = age / 1050;
+        const alpha = Math.pow(1 - progress, 2.1) * burst.energy;
+        const radius = 18 + progress * 110;
         const color = burst.performer === 'human' ? '242,240,232' : '200,255,69';
         const glow = context.createRadialGradient(
           burst.x, burst.y, 0,
-          burst.x, burst.y, Math.max(1, radius * .55)
+          burst.x, burst.y, Math.max(1, radius)
         );
-        glow.addColorStop(0, `rgba(${color},${alpha * .28})`);
-        glow.addColorStop(.35, `rgba(${color},${alpha * .12})`);
+        glow.addColorStop(0, `rgba(${color},${alpha * .34})`);
+        glow.addColorStop(.2, `rgba(${color},${alpha * .11})`);
         glow.addColorStop(1, `rgba(${color},0)`);
         context.fillStyle = glow;
-        context.fillRect(0, 0, viewportWidth, viewportHeight);
-        context.strokeStyle = `rgba(${color},${alpha * .68})`;
-        context.lineWidth = 1.5 + burst.energy * 5 * (1 - progress);
-        context.shadowColor = `rgba(${color},${alpha})`;
-        context.shadowBlur = 22 + burst.energy * 38;
+        context.fillRect(burst.x - radius, burst.y - radius, radius * 2, radius * 2);
+        context.strokeStyle = `rgba(${color},${alpha * .82})`;
+        context.lineWidth = .7 + burst.energy * 2.4 * (1 - progress);
+        context.shadowColor = `rgba(${color},${alpha * .72})`;
+        context.shadowBlur = 9 + burst.energy * 18;
         context.beginPath();
-        context.arc(burst.x, burst.y, radius, 0, Math.PI * 2);
-        context.stroke();
-      }
-      context.restore();
-    }
-
-    function relationshipShape(relationship) {
-      switch (relationship) {
-        case 'sequence': return {points: 7, twist: .9, stretch: 1.7};
-        case 'inversion': return {points: 4, twist: -1.4, stretch: 1};
-        case 'fragmentation': return {points: 11, twist: 2.4, stretch: .72};
-        case 'augmentation': return {points: 6, twist: .25, stretch: 2.25};
-        case 'originalReturn': return {points: 3, twist: 0, stretch: 2.8};
-        case 'tailVariation': return {points: 5, twist: 1.2, stretch: 1.15};
-        default: return {points: 8, twist: .45, stretch: 1};
-      }
-    }
-
-    function drawLineageForms(now, beatProgress) {
-      context.save();
-      context.globalCompositeOperation = 'screen';
-      for (let index = lineageSignals.length - 1; index >= 0; index--) {
-        const signal = lineageSignals[index];
-        const age = now - signal.startedAt;
-        if (age > 5200) {
-          lineageSignals.splice(index, 1);
-          continue;
-        }
-        const progress = age / 5200;
-        const shape = relationshipShape(signal.relationship);
-        const seed = (signal.origin * 0.61803398875) % 1;
-        const centerX = viewportWidth * (.5 + Math.sin(seed * 9 + signal.generation) * .08);
-        const centerY = viewportHeight * (.18 + (1 - signal.pitch) * .64);
-        const base = Math.min(viewportWidth, viewportHeight) * (.12 + signal.energy * .18);
-        const radius = base * shape.stretch * (1 + progress * 1.45);
-        const alpha = Math.pow(1 - progress, 1.35) * (.38 + signal.energy * .5);
-        const rotation = seed * Math.PI * 2
-          + beatProgress * Math.PI * 2 * shape.twist
-          + signal.generation * .37;
-
-        context.strokeStyle = signal.relationship === 'originalReturn'
-          ? `rgba(242,240,232,${alpha})`
-          : `rgba(200,255,69,${alpha})`;
-        context.fillStyle = `rgba(200,255,69,${alpha * .055})`;
-        context.lineWidth = 1.5 + signal.energy * 6 * (1 - progress);
-        context.shadowColor = `rgba(200,255,69,${alpha})`;
-        context.shadowBlur = 28 + signal.energy * 72;
-        context.beginPath();
-        for (let point = 0; point <= shape.points; point++) {
-          const angle = rotation + point / shape.points * Math.PI * 2;
-          const alternate = point % 2 ? .56 : 1;
-          const fragmentation = signal.relationship === 'fragmentation'
-            ? .62 + ((point * 37 + signal.generation) % 5) * .1
-            : alternate;
-          const r = radius * fragmentation;
-          const x = centerX + Math.cos(angle) * r;
-          const y = centerY + Math.sin(angle) * r * (.64 + seed * .3);
-          if (point === 0) context.moveTo(x, y);
-          else context.lineTo(x, y);
-        }
-        context.closePath();
-        context.fill();
-        context.stroke();
-
-        context.lineWidth = Math.max(1, 4 * (1 - progress));
-        context.strokeStyle = `rgba(242,240,232,${alpha * .48})`;
-        context.beginPath();
-        context.moveTo(viewportWidth * .12, centerY + Math.sin(rotation) * radius * .2);
-        context.quadraticCurveTo(
-          centerX,
-          centerY - radius * (signal.relationship === 'inversion' ? -.72 : .72),
-          viewportWidth * .88,
-          centerY
+        context.moveTo(burst.x, burst.y - radius * .38);
+        context.bezierCurveTo(
+          burst.x - radius * .16, burst.y - radius * .12,
+          burst.x + radius * .16, burst.y + radius * .12,
+          burst.x, burst.y + radius * .38
         );
         context.stroke();
-
-        if (signal.relationship === 'originalReturn') {
-          context.fillStyle = `rgba(242,240,232,${alpha * .09})`;
-          context.fillRect(0, 0, viewportWidth, viewportHeight);
-        }
       }
       context.restore();
     }
 
-    function drawMembrane(now, beatProgress, absoluteBeat) {
+    function relationshipMotion(relationship) {
+      switch (relationship) {
+        case 'sequence': return {strands: 13, spread: 11, drift: .9, life: 10500};
+        case 'inversion': return {strands: 11, spread: 14, drift: -1.1, life: 11000};
+        case 'fragmentation': return {strands: 7, spread: 19, drift: 1.5, life: 8200};
+        case 'augmentation': return {strands: 17, spread: 9, drift: .35, life: 14500};
+        case 'originalReturn': return {strands: 21, spread: 7, drift: 0, life: 13000};
+        case 'tailVariation': return {strands: 9, spread: 12, drift: .7, life: 9500};
+        default: return {strands: 9, spread: 10, drift: .45, life: 9000};
+      }
+    }
+
+    function gestureCoordinates(points, bounds, xStart, xEnd) {
+      if (!points?.length) return [];
+      const maximumTime = Math.max(
+        .25,
+        ...points.map(point => point.relativeOnsetBeats + point.durationBeats)
+      );
+      const span = Math.max(5, bounds.maximumNote - bounds.minimumNote);
+      return points.map(point => ({
+        x: xStart + point.relativeOnsetBeats / maximumTime * (xEnd - xStart),
+        y: viewportHeight * (.78 - (point.note - bounds.minimumNote) / span * .56),
+        intensity: point.intensity ?? .6,
+        duration: point.durationBeats / maximumTime
+      }));
+    }
+
+    function strokeGesture(points, offset, fragment, alpha) {
+      if (!points.length) return;
+      if (points.length === 1) {
+        context.globalAlpha = alpha;
+        context.beginPath();
+        context.arc(points[0].x, points[0].y + offset, 1.2, 0, Math.PI * 2);
+        context.stroke();
+        return;
+      }
+      context.beginPath();
+      let previous = points[0];
+      context.moveTo(previous.x, previous.y + offset);
+      for (let index = 1; index < points.length; index++) {
+        const point = points[index];
+        if (fragment && point.x - previous.x > viewportWidth * .2) {
+          context.moveTo(point.x, point.y + offset);
+          previous = point;
+          continue;
+        }
+        const middleX = (previous.x + point.x) * .5;
+        const middleY = (previous.y + point.y) * .5 + offset;
+        context.quadraticCurveTo(
+          previous.x,
+          previous.y + offset,
+          middleX,
+          middleY
+        );
+        previous = point;
+      }
+      context.lineTo(previous.x, previous.y + offset);
+      context.globalAlpha = alpha;
+      context.stroke();
+    }
+
+    function drawHumanTrace(now) {
+      if (humanTrace.length < 2) return;
+      const recent = humanTrace.map(point => ({
+        x: viewportWidth * (.08 + Math.max(0, 1 - (now - point.startedAt) / 9000) * .4),
+        y: viewportHeight * (.8 - Math.max(0, Math.min(1, (point.note - 36) / 48)) * .6),
+        intensity: point.energy
+      }));
+      context.save();
+      context.strokeStyle = 'rgba(242,240,232,.13)';
+      context.lineWidth = 1;
+      strokeGesture(recent, 0, false, .8);
+      context.restore();
+    }
+
+    function drawLineageForms(now) {
+      context.save();
+      context.globalCompositeOperation = 'screen';
+      drawHumanTrace(now);
+      for (const [responseID, signal] of phraseFields) {
+        const age = now - signal.startedAt;
+        const motion = relationshipMotion(signal.relationship);
+        if (now - signal.lastAt > motion.life) {
+          phraseFields.delete(responseID);
+          continue;
+        }
+        const progress = Math.min(1, age / motion.life);
+        const fade = Math.pow(1 - Math.max(0, (now - signal.lastAt) / motion.life), 1.4);
+        const sourceGesture = signal.relationship === 'originalReturn'
+          ? signal.originGesture
+          : (signal.sourceGesture.length ? signal.sourceGesture : signal.originGesture);
+        const responseGesture = signal.responseGesture.slice(0, signal.revealed);
+        const allNotes = [...sourceGesture, ...signal.responseGesture].map(point => point.note);
+        const bounds = {
+          minimumNote: Math.min(...allNotes, 48) - 2,
+          maximumNote: Math.max(...allNotes, 60) + 2
+        };
+        const source = gestureCoordinates(sourceGesture, bounds, viewportWidth * .08, viewportWidth * .49);
+        const response = gestureCoordinates(responseGesture, bounds, viewportWidth * .51, viewportWidth * .92);
+        const drift = Math.sin(now * .00023 + signal.generation * .7) * motion.spread * motion.drift;
+
+        context.shadowBlur = 0;
+        context.lineWidth = .75;
+        context.strokeStyle = 'rgba(242,240,232,.34)';
+        for (let strand = -3; strand <= 3; strand++) {
+          strokeGesture(source, strand * 3.2, false, fade * (.16 + (3 - Math.abs(strand)) * .05));
+        }
+
+        const fragment = signal.relationship === 'fragmentation';
+        for (let strand = 0; strand < motion.strands; strand++) {
+          const centered = strand - (motion.strands - 1) / 2;
+          const breathing = Math.sin(now * .00042 + strand * .63 + signal.generation) * 3;
+          const offset = centered * motion.spread * (.45 + progress * .55) + drift + breathing;
+          const centrality = 1 - Math.abs(centered) / Math.max(1, motion.strands / 2);
+          context.strokeStyle = signal.relationship === 'originalReturn'
+            ? 'rgba(242,240,232,.95)'
+            : 'rgba(200,255,69,.92)';
+          context.lineWidth = .45 + centrality * (1.1 + signal.energy * 1.8);
+          context.shadowColor = signal.relationship === 'originalReturn'
+            ? 'rgba(242,240,232,.42)'
+            : 'rgba(200,255,69,.38)';
+          context.shadowBlur = 3 + centrality * 13 * signal.energy;
+          strokeGesture(response, offset, fragment, fade * (.12 + centrality * .5));
+        }
+
+        const links = Math.min(source.length, response.length);
+        context.shadowBlur = 0;
+        context.lineWidth = .6;
+        context.strokeStyle = 'rgba(242,240,232,.18)';
+        for (let point = 0; point < links; point++) {
+          const start = source[Math.floor(point * source.length / links)];
+          const end = response[Math.floor(point * response.length / links)];
+          context.beginPath();
+          context.moveTo(start.x, start.y);
+          context.bezierCurveTo(
+            viewportWidth * .46, start.y,
+            viewportWidth * .54, end.y,
+            end.x, end.y
+          );
+          context.globalAlpha = fade * .45;
+          context.stroke();
+        }
+      }
+      context.globalAlpha = 1;
+      context.restore();
+    }
+
+    function drawMembrane(now, beatProgress, absoluteBeat, deltaSeconds) {
       const memory = expression('expressionMemory', 0);
       const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
       const activity = Math.max(expression('expressionActivity', 0), audioEnergy);
@@ -925,8 +1025,8 @@
       const fade = .13 - resonance * .075;
       context.fillStyle = `rgba(8,9,8,${Math.max(.055, fade)})`;
       context.fillRect(0, 0, viewportWidth, viewportHeight);
-      drawBursts(now);
-      drawLineageForms(now, beatProgress);
+      drawBursts(now, deltaSeconds);
+      drawLineageForms(now);
 
       const gradient = context.createLinearGradient(0, 0, viewportWidth, 0);
       gradient.addColorStop(0, `rgba(242,240,232,${.22 + activity * .28})`);
@@ -1011,7 +1111,7 @@
       consumeVisualEvents(now);
       const clock = updateClock(now);
       evolveMembrane(now, deltaSeconds);
-      drawMembrane(now, clock.beatProgress, clock.absoluteBeat);
+      drawMembrane(now, clock.beatProgress, clock.absoluteBeat, deltaSeconds);
       requestAnimationFrame(render);
     }
 
@@ -1024,7 +1124,21 @@
       }
     }
 
-    async function toggleAudio() {
+    async function refreshAudioInputs(selectedDeviceID = ui.audioInput.value) {
+      if (!navigator.mediaDevices?.enumerateDevices) return;
+      const devices = (await navigator.mediaDevices.enumerateDevices())
+        .filter(device => device.kind === 'audioinput');
+      const options = [new Option('System default', '')];
+      devices.forEach((device, index) => {
+        options.push(new Option(device.label || `Audio input ${index + 1}`, device.deviceId));
+      });
+      ui.audioInput.replaceChildren(...options);
+      if ([...ui.audioInput.options].some(option => option.value === selectedDeviceID)) {
+        ui.audioInput.value = selectedDeviceID;
+      }
+    }
+
+    async function toggleAudio(forceStart = false) {
       if (audioStream) {
         audioStream.getTracks().forEach(track => track.stop());
         audioStream = null;
@@ -1034,12 +1148,18 @@
         if (audioContext) await audioContext.close();
         audioContext = null;
         ui.audioButton.textContent = 'Audio';
-        ui.hint.textContent = 'Audio input is optional and stays inside this browser.';
-        return;
+        ui.hint.textContent = 'MIDI shapes the field. Audio analysis is off.';
+        if (!forceStart) return;
       }
       try {
+        const selectedDeviceID = ui.audioInput.value;
         audioStream = await navigator.mediaDevices.getUserMedia({
-          audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false},
+          audio: {
+            deviceId: selectedDeviceID ? {exact: selectedDeviceID} : undefined,
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          },
           video: false
         });
         audioContext = new AudioContext();
@@ -1050,8 +1170,10 @@
         audioWaveform = new Uint8Array(audioAnalyser.fftSize);
         audioSpectrum = new Uint8Array(audioAnalyser.frequencyBinCount);
         source.connect(audioAnalyser);
+        await refreshAudioInputs(audioStream.getAudioTracks()[0]?.getSettings().deviceId);
         ui.audioButton.textContent = 'Audio on';
-        ui.hint.textContent = 'Audio energy and brightness now shape the field locally.';
+        const label = ui.audioInput.selectedOptions[0]?.textContent ?? 'selected input';
+        ui.hint.textContent = `${label} shapes energy and brightness locally.`;
       } catch (error) {
         audioStream = null;
         ui.hint.textContent = `Audio input unavailable: ${error.message}`;
@@ -1071,12 +1193,19 @@
     ui.resetButton.addEventListener('click', () => command('stop'));
     ui.humanVolume.addEventListener('input', event => queueVolume('human', event.target.value));
     ui.companionVolume.addEventListener('input', event => queueVolume('companion', event.target.value));
+    ui.audioInput.addEventListener('change', () => {
+      if (audioStream) toggleAudio(true);
+    });
     window.addEventListener('resize', resizeCanvas);
     window.addEventListener('beforeunload', () => {
       audioStream?.getTracks().forEach(track => track.stop());
     });
     resizeCanvas();
     rebuildBeats(4);
+    refreshAudioInputs().catch(() => {});
+    navigator.mediaDevices?.addEventListener('devicechange', () => {
+      refreshAudioInputs().catch(() => {});
+    });
     requestAnimationFrame(render);
 
     const events = new EventSource('/events');

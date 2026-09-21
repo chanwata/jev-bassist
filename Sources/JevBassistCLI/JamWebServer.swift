@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import JevBassistCore
 import Network
 
 struct JamVisualEvent: Codable, Sendable {
@@ -14,6 +15,9 @@ struct JamVisualEvent: Codable, Sendable {
     let parentResponseID: UInt64?
     let generation: Int?
     let relationship: String?
+    let originGesture: [ConversationGesturePoint]?
+    let sourceGesture: [ConversationGesturePoint]?
+    let responseGesture: [ConversationGesturePoint]?
 }
 
 struct JamWebState: Codable, Sendable {

@@ -198,6 +198,19 @@ The primary human evaluation is a short rating of “this felt like another play
 - make original return visibly converge and flash across the field while preserving motion-reduction behavior;
 - keep clock and controls nearly invisible until hover or focus so the performance remains the primary surface.
 
+### M12 P7: musical phrase shaping and shared trajectory field
+
+- place generated pitches into the companion register as one phrase, preserving contour across octave boundaries;
+- express sequence and inversion in modal scale degrees before register placement;
+- retain the opening, salient interior events, and ending when a long motif must be bounded;
+- score the rendered notes for recognition, contour, modal fit, voice leading, cadence, continuity, and space;
+- shape velocity and articulation as a phrase while preserving relative rhythm and characteristic accents;
+- advance response continuity and divergence only after a Note On crosses the rolling commitment horizon;
+- include bounded pitches, intervals, timing, landing, and continuity features in Jev candidate descriptions while keeping note generation local;
+- carry origin, current source, and response gestures with lineage and reveal only the committed response prefix in the browser;
+- replace relationship polygons with layered curve trajectories whose spacing, direction, gaps, scale, and convergence reflect the audible transformation;
+- allow an explicit browser audio-input selection for optional local energy and brightness analysis without treating the default microphone as the session mix.
+
 ## Out of scope for the early MVP
 
 - audio transcription;
