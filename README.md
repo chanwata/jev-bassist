@@ -195,9 +195,9 @@ swift run jev-bassist jam \
   --ui
 ```
 
-Play a concise subject, then leave roughly a beat of room for the first answer. The engine infers the subject's tonal center, holds that center and the selected mode for the complete cycle, and derives each stage's triad locally. The deterministic form moves through `answer`, `sequence`, `inversion`, `fragmentation`, `augmentation`, `diminution`, `stretto`, and `return`. The final bar restates the complete original contour even when the bounded Jev activity decision requests rest. Jev still controls density, temporal attitude, secondary motion, and cadence inside each formal stage; it cannot discard the subject or select individual notes.
+Play a concise two-to-six-note idea, then leave enough silence for it to be recognized as a phrase. The first answer preserves its timing and contour on a future shared beat. Continue naturally: density, register movement, contour similarity, and phrase length invite augmentation, sequence, inversion, or fragmentation. Once those transformations have accumulated enough distance, the unchanged origin returns. A short pluck, organ, harpsichord-like patch, or restrained strings keeps the one-voice exchange clearer than a long pad.
 
-During the cycle, keep playing naturally. A new bar containing at least three notes is remembered as a possible next subject, and the most recent candidate takes over only after the current subject has returned. A short pluck, organ, harpsichord-like patch, or restrained strings will keep overlapping entries clearer than a long pad. The terminal log and browser header show the current development stage.
+With `--brain jev`, one request is made per completed phrase and Jev may select only from those locally safe transformations. With `--brain rules`, the same candidates and timing run entirely offline. The terminal reports `brain=jev`, `brain=rules`, or `brain=fallback`; the browser expresses the selected relationship as geometry rather than adding a large status label.
 
 `--human-volume` and `--companion-volume` accept MIDI values from 0 to 127 and default to 100 and 72. They send Channel Volume (CC7) to the input and output part channels, so the parts must use different MIDI channels for independent control. If both channel options are the same, the two GUI controls are linked because one MIDI part cannot have two CC7 values.
 
@@ -230,9 +230,15 @@ Swift sends state changes with server-sent events. Between updates the page rend
 
 Create an API key in the [TypeSafe dashboard](https://console.typesafe.ai/) and place it in the environment. Do not put the key in a command-line option, fixture, or log:
 
+In zsh, enter it without echoing the value or placing it in shell history:
+
 ```bash
-export TYPESAFE_API_KEY='your-key-here'
+read -s "TYPESAFE_API_KEY?TypeSafe API key: "
+export TYPESAFE_API_KEY
+echo
 ```
+
+This sets the key only for the current Terminal tab. Run the `jam` command in that same tab. Closing the tab removes it; repeat the three lines next time rather than committing the key to this repository.
 
 Then run the same session with `--brain jev`:
 
