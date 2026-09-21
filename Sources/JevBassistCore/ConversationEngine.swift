@@ -22,6 +22,10 @@ public struct ConversationLineage: Codable, Equatable, Sendable {
     public let originGesture: [ConversationGesturePoint]
     public let sourceGesture: [ConversationGesturePoint]
     public let responseGesture: [ConversationGesturePoint]
+    public let developmentSourceMotifID: UInt64
+    public let intent: ConversationIntent
+    public let turnState: ConversationTurnState
+    public let interaction: InteractionEvidence
 
     public init(
         originMotifID: UInt64,
@@ -32,7 +36,11 @@ public struct ConversationLineage: Codable, Equatable, Sendable {
         relationship: ConversationRelationship,
         originGesture: [ConversationGesturePoint] = [],
         sourceGesture: [ConversationGesturePoint] = [],
-        responseGesture: [ConversationGesturePoint] = []
+        responseGesture: [ConversationGesturePoint] = [],
+        developmentSourceMotifID: UInt64? = nil,
+        intent: ConversationIntent = .continueIdea,
+        turnState: ConversationTurnState = .responding,
+        interaction: InteractionEvidence = .unavailable
     ) {
         self.originMotifID = originMotifID
         self.sourceMotifID = sourceMotifID
@@ -43,11 +51,16 @@ public struct ConversationLineage: Codable, Equatable, Sendable {
         self.originGesture = originGesture
         self.sourceGesture = sourceGesture
         self.responseGesture = responseGesture
+        self.developmentSourceMotifID = developmentSourceMotifID ?? sourceMotifID
+        self.intent = intent
+        self.turnState = turnState
+        self.interaction = interaction
     }
 
     private enum CodingKeys: String, CodingKey {
         case originMotifID, sourceMotifID, responseID, parentResponseID
         case generation, relationship, originGesture, sourceGesture, responseGesture
+        case developmentSourceMotifID, intent, turnState, interaction
     }
 
     public init(from decoder: Decoder) throws {
@@ -70,7 +83,23 @@ public struct ConversationLineage: Codable, Equatable, Sendable {
             responseGesture: try container.decodeIfPresent(
                 [ConversationGesturePoint].self,
                 forKey: .responseGesture
-            ) ?? []
+            ) ?? [],
+            developmentSourceMotifID: try container.decodeIfPresent(
+                UInt64.self,
+                forKey: .developmentSourceMotifID
+            ),
+            intent: try container.decodeIfPresent(
+                ConversationIntent.self,
+                forKey: .intent
+            ) ?? .continueIdea,
+            turnState: try container.decodeIfPresent(
+                ConversationTurnState.self,
+                forKey: .turnState
+            ) ?? .responding,
+            interaction: try container.decodeIfPresent(
+                InteractionEvidence.self,
+                forKey: .interaction
+            ) ?? .unavailable
         )
     }
 }
@@ -467,6 +496,7 @@ public struct ResponseCandidateGenerator: Sendable {
     public func developmentCandidates(
         origin: Motif,
         current: Motif,
+        sharedTheme: Motif? = nil,
         pitchContext: ModalPitchContext,
         previousResponse: [ConversationResponseNote] = []
     ) -> [ConversationResponseCandidate] {
@@ -475,7 +505,8 @@ public struct ResponseCandidateGenerator: Sendable {
             pitchContext: pitchContext,
             previousResponse: previousResponse
         )
-        let source = subject(from: origin)
+        let source = subject(from: sharedTheme ?? origin)
+        let originSource = subject(from: origin)
         guard source.count >= 2 else { return result }
         let continuity = previousResponse.last?.note
         let rawShift = pitchContext.scaleDegreeDistance(
@@ -521,8 +552,11 @@ public struct ResponseCandidateGenerator: Sendable {
             durationScale: 1.35
         )
         let original = shapedNotes(
-            source,
-            pitches: pitchContext.placePhrase(source.map(\.note), continuityReference: continuity),
+            originSource,
+            pitches: pitchContext.placePhrase(
+                originSource.map(\.note),
+                continuityReference: continuity
+            ),
             relationship: .originalReturn
         )
 
@@ -531,7 +565,14 @@ public struct ResponseCandidateGenerator: Sendable {
             developmentCandidate("inversion", .inversion, inversion, source, pitchContext, previousResponse),
             developmentCandidate("fragment", .fragmentation, fragment, fragmentSource, pitchContext, previousResponse),
             developmentCandidate("augment", .augmentation, augmentation, source, pitchContext, previousResponse),
-            developmentCandidate("return", .originalReturn, original, source, pitchContext, previousResponse)
+            developmentCandidate(
+                "return",
+                .originalReturn,
+                original,
+                originSource,
+                pitchContext,
+                previousResponse
+            )
         ]
         return result
     }
@@ -539,18 +580,21 @@ public struct ResponseCandidateGenerator: Sendable {
     public func subject(from motif: Motif, maximumNotes: Int = 8) -> [MotifNote] {
         guard motif.notes.count > maximumNotes else { return motif.notes }
         var selected = Set([0, motif.notes.count - 1])
-        selected.formUnion(motif.features.accentedNoteIndices)
-        selected.formUnion(motif.features.restedNoteIndices)
+        var structural: Set<Int> = []
+        structural.formUnion(motif.features.accentedNoteIndices)
+        structural.formUnion(motif.features.restedNoteIndices)
         for interval in motif.features.characteristicIntervalIndices {
-            selected.insert(interval)
-            selected.insert(min(motif.notes.count - 1, interval + 1))
+            structural.insert(interval)
+            structural.insert(min(motif.notes.count - 1, interval + 1))
         }
         let ranked = motif.notes.indices.sorted { left, right in
             let leftScore = motif.notes[left].accent
                 + min(1, motif.notes[left].durationBeats) * 0.3
+                + (structural.contains(left) ? 0.55 : 0)
                 + (left == motif.notes.count - 1 ? 0.4 : 0)
             let rightScore = motif.notes[right].accent
                 + min(1, motif.notes[right].durationBeats) * 0.3
+                + (structural.contains(right) ? 0.55 : 0)
                 + (right == motif.notes.count - 1 ? 0.4 : 0)
             return leftScore == rightScore ? left < right : leftScore > rightScore
         }
@@ -767,11 +811,19 @@ public struct ResponseArbiter: Sendable {
         if context.generation == 0 {
             return candidates.first { $0.relationship == .echo } ?? choose(from: candidates)
         }
-        if context.accumulatedDivergence >= 1.2 {
+        if context.intent == .settle || context.accumulatedDivergence >= 0.92 {
             return candidates.first { $0.relationship == .originalReturn }
         }
         let preferred: ConversationRelationship
-        if context.notesPerBeat >= 2.2 {
+        if context.intent == .wait {
+            preferred = .rest
+        } else if context.intent == .support {
+            preferred = .hold
+        } else if context.intent == .acknowledge {
+            preferred = .echo
+        } else if context.intent == .question {
+            preferred = .tailVariation
+        } else if context.notesPerBeat >= 2.2 {
             preferred = .augmentation
         } else if context.registerShift >= 3 {
             preferred = .sequence
@@ -798,6 +850,10 @@ public struct ConversationDevelopmentContext: Codable, Equatable, Sendable {
     public let notesPerBeat: Double
     public let registerShift: Int
     public let originDurationBeats: Double
+    public let intent: ConversationIntent
+    public let turnState: ConversationTurnState
+    public let interactionConfidence: Double
+    public let themeRevision: UInt64
 
     public init(
         generation: Int,
@@ -805,7 +861,11 @@ public struct ConversationDevelopmentContext: Codable, Equatable, Sendable {
         originSimilarity: Double,
         notesPerBeat: Double,
         registerShift: Int,
-        originDurationBeats: Double
+        originDurationBeats: Double,
+        intent: ConversationIntent = .continueIdea,
+        turnState: ConversationTurnState = .listening,
+        interactionConfidence: Double = 0,
+        themeRevision: UInt64 = 1
     ) {
         self.generation = generation
         self.accumulatedDivergence = accumulatedDivergence
@@ -813,6 +873,42 @@ public struct ConversationDevelopmentContext: Codable, Equatable, Sendable {
         self.notesPerBeat = notesPerBeat
         self.registerShift = registerShift
         self.originDurationBeats = originDurationBeats
+        self.intent = intent
+        self.turnState = turnState
+        self.interactionConfidence = min(1, max(0, interactionConfidence))
+        self.themeRevision = themeRevision
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case generation, accumulatedDivergence, originSimilarity, notesPerBeat
+        case registerShift, originDurationBeats, intent, turnState
+        case interactionConfidence, themeRevision
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            generation: try container.decode(Int.self, forKey: .generation),
+            accumulatedDivergence: try container.decode(
+                Double.self,
+                forKey: .accumulatedDivergence
+            ),
+            originSimilarity: try container.decode(Double.self, forKey: .originSimilarity),
+            notesPerBeat: try container.decode(Double.self, forKey: .notesPerBeat),
+            registerShift: try container.decode(Int.self, forKey: .registerShift),
+            originDurationBeats: try container.decode(Double.self, forKey: .originDurationBeats),
+            intent: try container.decodeIfPresent(ConversationIntent.self, forKey: .intent)
+                ?? .continueIdea,
+            turnState: try container.decodeIfPresent(
+                ConversationTurnState.self,
+                forKey: .turnState
+            ) ?? .listening,
+            interactionConfidence: try container.decodeIfPresent(
+                Double.self,
+                forKey: .interactionConfidence
+            ) ?? 0,
+            themeRevision: try container.decodeIfPresent(UInt64.self, forKey: .themeRevision) ?? 1
+        )
     }
 }
 
@@ -864,6 +960,7 @@ public struct ConversationSelectionInput: Codable, Equatable, Sendable {
     public let localCandidateID: String
     public let tonalCenterPitchClass: UInt8?
     public let tonalCenterConfidence: Double
+    public let state: ConversationStateSummary?
 
     public init(
         revision: UInt64,
@@ -874,7 +971,8 @@ public struct ConversationSelectionInput: Codable, Equatable, Sendable {
         candidates: [ConversationCandidateSummary],
         localCandidateID: String,
         tonalCenterPitchClass: UInt8? = nil,
-        tonalCenterConfidence: Double = 1
+        tonalCenterConfidence: Double = 1,
+        state: ConversationStateSummary? = nil
     ) {
         self.revision = revision
         self.mode = mode
@@ -885,6 +983,7 @@ public struct ConversationSelectionInput: Codable, Equatable, Sendable {
         self.localCandidateID = localCandidateID
         self.tonalCenterPitchClass = tonalCenterPitchClass
         self.tonalCenterConfidence = min(1, max(0, tonalCenterConfidence))
+        self.state = state
     }
 }
 
@@ -934,8 +1033,9 @@ private struct PendingConversation: Sendable {
 
 private struct PlannedConversationResponse: Sendable {
     let candidate: ConversationResponseCandidate
+    let plannedEndMicroseconds: UInt64
     var committedNoteCount: Int
-    var divergenceApplied: Bool
+    var generationApplied: Bool
 }
 
 public struct ConversationEngine: Sendable {
@@ -945,16 +1045,27 @@ public struct ConversationEngine: Sendable {
 
     private let generator = ResponseCandidateGenerator()
     private let arbiter = ResponseArbiter()
+    private let interactionMatcher = InteractionMatcher()
     private let decisionProvider: any ConversationDecisionProvider
     private var originMotif: Motif?
+    private var sharedThemeMotif: Motif?
+    private var pendingThemeMotif: Motif?
+    private var previousHumanMotif: Motif?
+    private var latestInteraction = InteractionEvidence.unavailable
+    private var currentIntent: ConversationIntent = .acknowledge
+    private var turnState: ConversationTurnState = .listening
+    private var themeRevision: UInt64 = 1
     private var generation = 0
     private var accumulatedDivergence = 0.0
     private var nextResponseID: UInt64 = 1
     private var previousResponseID: UInt64?
     private var previousResponseNotes: [ConversationResponseNote] = []
+    private var previousResponseEndedAtMicroseconds: UInt64?
+    private var spontaneousProposalUsed = false
     private var plannedResponses: [UInt64: PlannedConversationResponse] = [:]
     private var tonalCenterPitchClass: UInt8?
     private var tonalCenterConfidence = 0.0
+    private var recentTonalMotifs: [Motif] = []
     private var nextRevision: UInt64 = 1
     private var pendingConversation: PendingConversation?
 
@@ -1000,6 +1111,7 @@ public struct ConversationEngine: Sendable {
         _ motif: Motif,
         availableAtMicroseconds: UInt64
     ) -> BassBarPlan? {
+        spontaneousProposalUsed = false
         if let pendingConversation {
             decisionProvider.expire(revision: pendingConversation.selectionInput.revision)
             self.pendingConversation = nil
@@ -1016,14 +1128,19 @@ public struct ConversationEngine: Sendable {
             candidates: prepared.candidates.map(ConversationCandidateSummary.init),
             localCandidateID: prepared.localSelection.id,
             tonalCenterPitchClass: prepared.tonalCenterPitchClass,
-            tonalCenterConfidence: tonalCenterConfidence
+            tonalCenterConfidence: tonalCenterConfidence,
+            state: conversationState(
+                origin: prepared.origin,
+                sharedTheme: prepared.developmentSource,
+                latestHuman: motif
+            )
         )
         decisionProvider.prepare(input)
         if let resolution = decisionProvider.resolution(for: input),
            let selected = prepared.candidates.first(where: {
                $0.id == resolution.candidateID
            }) {
-            let start = nextBeat(after: availableAtMicroseconds, beat: beatMicroseconds)
+            let start = responseOpportunity(after: availableAtMicroseconds)
             return finalize(
                 motif: motif,
                 selected: selected,
@@ -1033,8 +1150,7 @@ public struct ConversationEngine: Sendable {
             )
         }
 
-        let earliestDecision = availableAtMicroseconds + 350_000
-        let responseStart = nextBeat(after: earliestDecision, beat: beatMicroseconds)
+        let responseStart = responseOpportunity(after: availableAtMicroseconds)
         pendingConversation = PendingConversation(
             motif: motif,
             tonalCenterPitchClass: prepared.tonalCenterPitchClass,
@@ -1049,7 +1165,9 @@ public struct ConversationEngine: Sendable {
     }
 
     public mutating func advance(through offsetMicroseconds: UInt64) -> BassBarPlan? {
-        guard let pending = pendingConversation else { return nil }
+        guard let pending = pendingConversation else {
+            return autonomousContinuation(ifDueAt: offsetMicroseconds)
+        }
         let resolution = decisionProvider.resolution(for: pending.selectionInput)
         if resolution == nil, offsetMicroseconds < pending.selectionDeadlineMicroseconds {
             return nil
@@ -1070,9 +1188,9 @@ public struct ConversationEngine: Sendable {
             } ?? pending.candidates[0]
             source = .fallback
         }
-        let start = offsetMicroseconds < pending.responseStartMicroseconds
+        let start = offsetMicroseconds <= pending.responseStartMicroseconds
             ? pending.responseStartMicroseconds
-            : nextBeat(after: offsetMicroseconds, beat: beatMicroseconds)
+            : responseOpportunity(after: offsetMicroseconds)
         return finalize(
             motif: pending.motif,
             selected: selected,
@@ -1083,10 +1201,17 @@ public struct ConversationEngine: Sendable {
     }
 
     public mutating func yieldToHuman() {
-        if let pendingConversation {
-            decisionProvider.expire(revision: pendingConversation.selectionInput.revision)
-            self.pendingConversation = nil
+        turnState = .overlapping
+    }
+
+    public mutating func observeHumanGesture(_ observation: PhraseObservation) {
+        guard !observation.notes.isEmpty else { return }
+        if observation.simultaneousNoteGroups.contains(where: { $0.count > 1 }) {
+            currentIntent = .support
+        } else if observation.melodyNotes.count == 1 {
+            currentIntent = .acknowledge
         }
+        turnState = .listening
     }
 
     public func cancelPendingDecisions() {
@@ -1097,6 +1222,7 @@ public struct ConversationEngine: Sendable {
     /// rolling scheduler's commitment horizon.
     public mutating func acknowledgeCommittedResponseNote(responseID: UInt64) {
         guard var planned = plannedResponses[responseID] else { return }
+        let previousCount = planned.committedNoteCount
         planned.committedNoteCount = min(
             planned.candidate.notes.count,
             planned.committedNoteCount + 1
@@ -1105,13 +1231,28 @@ public struct ConversationEngine: Sendable {
         previousResponseNotes = Array(
             planned.candidate.notes.prefix(planned.committedNoteCount)
         )
-        if !planned.divergenceApplied {
-            if planned.candidate.relationship == .originalReturn {
+        if !planned.generationApplied, planned.committedNoteCount > 0 {
+            generation += 1
+            planned.generationApplied = true
+            turnState = .responding
+        }
+        if let originMotif {
+            if planned.candidate.relationship == .originalReturn,
+               planned.committedNoteCount == planned.candidate.notes.count {
                 accumulatedDivergence = 0
             } else {
-                accumulatedDivergence += divergence(for: planned.candidate)
+                accumulatedDivergence = interactionMatcher.distance(
+                    origin: originMotif,
+                    response: previousResponseNotes
+                )
             }
-            planned.divergenceApplied = true
+        }
+        if previousCount < planned.candidate.notes.count,
+           planned.committedNoteCount == planned.candidate.notes.count {
+            previousResponseEndedAtMicroseconds = planned.plannedEndMicroseconds
+            turnState = planned.candidate.relationship == .originalReturn
+                ? .settling
+                : .awaitingReply
         }
         plannedResponses[responseID] = planned
         trimPlannedResponses()
@@ -1130,13 +1271,24 @@ public struct ConversationEngine: Sendable {
 
     private mutating func prepareConversation(for motif: Motif) -> (
         originMotifID: UInt64,
+        origin: Motif,
+        developmentSource: Motif,
         tonalCenterPitchClass: UInt8,
         developmentContext: ConversationDevelopmentContext,
         candidates: [ConversationResponseCandidate],
         localSelection: ConversationResponseCandidate
     )? {
-        if originMotif == nil { originMotif = motif }
+        if originMotif == nil {
+            originMotif = motif
+            sharedThemeMotif = motif
+            previousHumanMotif = motif
+            currentIntent = .acknowledge
+            latestInteraction = .unavailable
+        } else {
+            updateConversationMemory(with: motif)
+        }
         guard let originMotif else { return nil }
+        let developmentSource = sharedThemeMotif ?? originMotif
         updateTonalCenter(origin: originMotif, current: motif)
         guard let center = tonalCenterPitchClass else {
             return nil
@@ -1146,13 +1298,23 @@ public struct ConversationEngine: Sendable {
         let candidates = generator.developmentCandidates(
             origin: originMotif,
             current: motif,
+            sharedTheme: developmentSource,
             pitchContext: pitchContext,
             previousResponse: previousResponseNotes
         )
         guard let selected = arbiter.choose(from: candidates, context: developmentContext) else {
             return nil
         }
-        return (originMotif.id, center, developmentContext, candidates, selected)
+        turnState = selected.relationship == .rest ? .listening : .preparing
+        return (
+            originMotif.id,
+            originMotif,
+            developmentSource,
+            center,
+            developmentContext,
+            candidates,
+            selected
+        )
     }
 
     private mutating func finalize(
@@ -1168,6 +1330,14 @@ public struct ConversationEngine: Sendable {
         )
         let decision = decision(for: selected.relationship)
         let responseID = nextResponseID
+        let developmentSource: Motif = switch selected.relationship {
+        case .rest, .echo, .tailVariation, .hold:
+            motif
+        case .originalReturn:
+            originMotif ?? motif
+        case .sequence, .inversion, .fragmentation, .augmentation:
+            sharedThemeMotif ?? originMotif ?? motif
+        }
         let lineage = ConversationLineage(
             originMotifID: originMotif?.id ?? motif.id,
             sourceMotifID: motif.id,
@@ -1176,16 +1346,22 @@ public struct ConversationEngine: Sendable {
             generation: generation,
             relationship: selected.relationship,
             originGesture: motifGesture(generator.subject(from: originMotif ?? motif)),
-            sourceGesture: motifGesture(generator.subject(from: motif)),
-            responseGesture: responseGesture(selected.notes)
+            sourceGesture: motifGesture(generator.subject(from: developmentSource)),
+            responseGesture: responseGesture(selected.notes),
+            developmentSourceMotifID: developmentSource.id,
+            intent: currentIntent,
+            turnState: .responding,
+            interaction: latestInteraction
         )
         nextResponseID += 1
-        generation += 1
-        plannedResponses[responseID] = PlannedConversationResponse(
-            candidate: selected,
-            committedNoteCount: 0,
-            divergenceApplied: false
-        )
+        if !selected.notes.isEmpty {
+            plannedResponses[responseID] = PlannedConversationResponse(
+                candidate: selected,
+                plannedEndMicroseconds: phrase.endMicroseconds,
+                committedNoteCount: 0,
+                generationApplied: false
+            )
+        }
         return BassBarPlan(
             sourceBarIndex: Int(motif.finalizedAtMicroseconds / barLength),
             targetBarIndex: Int(start / barLength),
@@ -1201,23 +1377,137 @@ public struct ConversationEngine: Sendable {
         )
     }
 
+    private mutating func updateConversationMemory(with motif: Motif) {
+        let interaction = interactionMatcher.compare(
+            human: motif,
+            response: previousResponseNotes,
+            responseEndedAtMicroseconds: previousResponseEndedAtMicroseconds,
+            beatMicroseconds: beatMicroseconds
+        )
+        let previousHumanSimilarity = previousHumanMotif.map {
+            interactionMatcher.similarity($0, motif)
+        } ?? 0
+        let originSimilarity = originMotif.map {
+            interactionMatcher.similarity($0, motif)
+        } ?? 0
+        latestInteraction = interaction
+
+        if interaction.confidence >= 0.58,
+           (interaction.kind == .imitation
+            || interaction.kind == .rhythmicReply
+            || interaction.kind == .continuation) {
+            sharedThemeMotif = motif
+            pendingThemeMotif = nil
+            themeRevision += 1
+            currentIntent = interaction.confidence >= 0.72 ? .continueIdea : .acknowledge
+        } else if previousHumanSimilarity >= 0.76 {
+            latestInteraction = InteractionEvidence(
+                kind: .selfRepetition,
+                confidence: previousHumanSimilarity,
+                pitchContour: previousHumanSimilarity,
+                intervalShape: previousHumanSimilarity,
+                rhythm: previousHumanSimilarity,
+                duration: 0.5,
+                responseDelayBeats: interaction.responseDelayBeats
+            )
+            currentIntent = .support
+        } else if originSimilarity >= 0.78, generation > 1 {
+            currentIntent = .settle
+            pendingThemeMotif = nil
+        } else if let pendingThemeMotif,
+                  interactionMatcher.similarity(pendingThemeMotif, motif) >= 0.62 {
+            sharedThemeMotif = motif
+            self.pendingThemeMotif = nil
+            themeRevision += 1
+            currentIntent = .continueIdea
+        } else if motif.boundaryConfidence >= 0.75,
+                  motif.melodyConfidence >= 0.72,
+                  interaction.confidence < 0.34 {
+            pendingThemeMotif = motif
+            currentIntent = .question
+        } else {
+            currentIntent = motif.notes.count <= 2 ? .acknowledge : .support
+        }
+        previousHumanMotif = motif
+        turnState = .listening
+    }
+
+    private mutating func autonomousContinuation(ifDueAt offset: UInt64) -> BassBarPlan? {
+        guard turnState == .awaitingReply,
+              !spontaneousProposalUsed,
+              let responseEnd = previousResponseEndedAtMicroseconds,
+              Double(offset) >= Double(responseEnd) + beatMicroseconds * 2,
+              let originMotif,
+              let source = sharedThemeMotif ?? previousHumanMotif,
+              let center = tonalCenterPitchClass else {
+            return nil
+        }
+        let context = ModalPitchContext(mode: mode, tonalCenterPitchClass: center)
+        let candidates = generator.developmentCandidates(
+            origin: originMotif,
+            current: source,
+            sharedTheme: source,
+            pitchContext: context,
+            previousResponse: previousResponseNotes
+        )
+        let selected = candidates.first { $0.relationship == .fragmentation }
+            ?? candidates.first { $0.relationship == .tailVariation }
+            ?? candidates.first { $0.relationship == .hold }
+        guard let selected else { return nil }
+        spontaneousProposalUsed = true
+        currentIntent = .question
+        turnState = .preparing
+        return finalize(
+            motif: source,
+            selected: selected,
+            tonalCenterPitchClass: center,
+            startMicroseconds: responseOpportunity(after: offset),
+            decisionSource: .rules
+        )
+    }
+
+    private func conversationState(
+        origin: Motif,
+        sharedTheme: Motif,
+        latestHuman: Motif
+    ) -> ConversationStateSummary {
+        ConversationStateSummary(
+            themeRevision: themeRevision,
+            intent: currentIntent,
+            turnState: turnState,
+            interaction: latestInteraction,
+            origin: ConversationMaterialSummary(motif: origin),
+            sharedTheme: ConversationMaterialSummary(motif: sharedTheme),
+            latestHuman: ConversationMaterialSummary(motif: latestHuman),
+            previousResponse: previousResponseID.map {
+                ConversationMaterialSummary(id: $0, response: previousResponseNotes)
+            }
+        )
+    }
+
     private mutating func updateTonalCenter(origin: Motif, current: Motif) {
         let planner = ModalHarmonyPlanner(mode: mode)
+        if recentTonalMotifs.last?.id != current.id {
+            recentTonalMotifs.append(current)
+            if recentTonalMotifs.count > 4 {
+                recentTonalMotifs.removeFirst(recentTonalMotifs.count - 4)
+            }
+        }
         if tonalCenterPitchClass == nil,
            let assessment = planner.assessTonalCenter(from: origin.legacyMemory().notes) {
             tonalCenterPitchClass = assessment.tonalCenterPitchClass
             tonalCenterConfidence = assessment.confidence
         }
         guard current.id != origin.id,
-              tonalCenterConfidence < 0.78,
               let assessment = planner.assessTonalCenter(
-                  from: origin.legacyMemory().notes + current.legacyMemory().notes
+                  from: recentTonalMotifs.flatMap { $0.legacyMemory().notes }
               ) else {
             return
         }
         if assessment.tonalCenterPitchClass == tonalCenterPitchClass {
             tonalCenterConfidence = max(tonalCenterConfidence, assessment.confidence)
-        } else if assessment.confidence >= tonalCenterConfidence + 0.15 {
+        } else if recentTonalMotifs.count >= 2,
+                  assessment.confidence >= max(0.72, tonalCenterConfidence + 0.18) {
             tonalCenterPitchClass = assessment.tonalCenterPitchClass
             tonalCenterConfidence = assessment.confidence
         }
@@ -1270,22 +1560,12 @@ public struct ConversationEngine: Sendable {
             originSimilarity: similarity,
             notesPerBeat: notesPerBeat,
             registerShift: registerShift,
-            originDurationBeats: origin.durationBeats
+            originDurationBeats: origin.durationBeats,
+            intent: currentIntent,
+            turnState: turnState,
+            interactionConfidence: latestInteraction.confidence,
+            themeRevision: themeRevision
         )
-    }
-
-    private func divergence(for candidate: ConversationResponseCandidate) -> Double {
-        let structural: Double = switch candidate.relationship {
-        case .rest, .hold: 0.15
-        case .echo: 0.2
-        case .tailVariation: 0.35
-        case .sequence: 0.55
-        case .fragmentation: 0.6
-        case .augmentation: 0.65
-        case .inversion: 0.8
-        case .originalReturn: 0
-        }
-        return structural + (1 - candidate.score.recognition) * 0.35
     }
 
     private mutating func trimPlannedResponses() {
@@ -1356,6 +1636,14 @@ public struct ConversationEngine: Sendable {
     private func nextBeat(after offset: UInt64, beat: Double) -> UInt64 {
         let beatIndex = floor(Double(offset) / beat) + 1
         return UInt64((beatIndex * beat).rounded())
+    }
+
+    private func responseOpportunity(after offset: UInt64) -> UInt64 {
+        let minimum = offset.addingReportingOverflow(80_000)
+        let safeMinimum = minimum.overflow ? UInt64.max : minimum.partialValue
+        let subdivision = beatMicroseconds * 0.5
+        let index = ceil(Double(safeMinimum) / subdivision)
+        return UInt64(min(Double(UInt64.max), (index * subdivision).rounded()))
     }
 
     private func decision(for relationship: ConversationRelationship) -> BassDecision {

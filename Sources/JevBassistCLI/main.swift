@@ -674,6 +674,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private static let schedulingHorizonMicroseconds: UInt64 = 50_000
 
     private let queue = DispatchQueue(label: "dev.jev-bassist.live-session")
+    private let sessionID = UUID().uuidString
     private let options: JamOptions
     private let output: CoreMIDIOutput
     private let stopSignal: @Sendable () -> Void
@@ -871,7 +872,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 update,
                 anchorHostTime: anchorHostTime,
                 currentOffsetMicroseconds: offset,
-                yieldingToHuman: yieldingToHuman
+                yieldingToHuman: false
             )
             if options.webUI {
                 appendVisualEvent(
@@ -957,6 +958,27 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             print(format(snapshot))
             lastChord = snapshot.state.chordCandidates.first?.displayName
         }
+        if !update.plans.isEmpty {
+            let cancellation = scheduler.yieldToHuman(at: currentOffsetMicroseconds)
+            for revision in cancellation.canceledRevisions {
+                if let lineage = schedulerLineage[revision] {
+                    engine.discardUncommittedConversationResponse(
+                        responseID: lineage.responseID
+                    )
+                    if options.webUI {
+                        appendVisualEvent(
+                            performer: "companion",
+                            kind: "cancel",
+                            note: 0,
+                            velocity: 0,
+                            sessionOffsetMicroseconds: currentOffsetMicroseconds,
+                            lineage: lineage
+                        )
+                    }
+                }
+                schedulerLineage.removeValue(forKey: revision)
+            }
+        }
         for plan in update.plans {
             print(format(plan, style: options.style))
             lastChord = plan.chord?.displayName
@@ -1027,9 +1049,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                     velocity: message.velocity,
                     sessionOffsetMicroseconds: message.offsetMicroseconds
                         + Self.outputSafetyOffsetMicroseconds,
+                    noteID: event.noteID,
                     lineage: schedulerLineage[event.revision]
                 )
             }
+            publishState(elapsedMicroseconds: currentOffsetMicroseconds)
         }
     }
 
@@ -1048,6 +1072,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         }
         stateHandler(
             JamWebState(
+                sessionID: sessionID,
                 running: !stopped && anchorHostTime != nil,
                 tempoBPM: options.tempoBPM,
                 beatsPerBar: options.beatsPerBar,
@@ -1113,6 +1138,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         note: UInt8,
         velocity: UInt8,
         sessionOffsetMicroseconds: UInt64,
+        noteID: UInt64? = nil,
         lineage: ConversationLineage? = nil
     ) {
         guard let startedAt else {
@@ -1120,7 +1146,9 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         }
         visualEvents.append(
             JamVisualEvent(
+                sessionID: sessionID,
                 id: nextVisualEventID,
+                noteID: noteID,
                 performer: performer,
                 kind: kind,
                 note: note,
@@ -1128,10 +1156,15 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 atUnixMilliseconds: startedAt.timeIntervalSince1970 * 1_000
                     + Double(sessionOffsetMicroseconds) / 1_000,
                 originMotifID: lineage?.originMotifID,
+                sourceMotifID: lineage?.sourceMotifID,
+                developmentSourceMotifID: lineage?.developmentSourceMotifID,
                 responseID: lineage?.responseID,
                 parentResponseID: lineage?.parentResponseID,
                 generation: lineage?.generation,
                 relationship: lineage?.relationship.rawValue,
+                intent: lineage?.intent.rawValue,
+                interaction: lineage?.interaction.kind.rawValue,
+                interactionConfidence: lineage?.interaction.confidence,
                 originGesture: lineage?.originGesture,
                 sourceGesture: lineage?.sourceGesture,
                 responseGesture: lineage?.responseGesture

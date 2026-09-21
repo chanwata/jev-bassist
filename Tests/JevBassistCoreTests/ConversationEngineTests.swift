@@ -69,7 +69,7 @@ final class ConversationEngineTests: XCTestCase {
         XCTAssertTrue(inversion.allSatisfy(context.contains))
     }
 
-    func testContextualDevelopmentReturnsToImmutableOriginAfterDivergence() throws {
+    func testContextualDevelopmentKeepsOriginAndAdvancesHeardGeneration() throws {
         let configuration = try MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4)
         var engine = ConversationEngine(
             musicalStateConfiguration: configuration,
@@ -78,36 +78,26 @@ final class ConversationEngineTests: XCTestCase {
         )
 
         let echo = try XCTUnwrap(engine.plan(for: motif(id: 1)))
-        let sequence = try XCTUnwrap(engine.plan(for: motif(
+        let second = try XCTUnwrap(engine.plan(for: motif(
             id: 2,
             pitches: [67, 70, 72],
             finalizedAt: 4_215_000
         )))
-        let augmentation = try XCTUnwrap(engine.plan(for: motif(
+        let third = try XCTUnwrap(engine.plan(for: motif(
             id: 3,
             pitches: [62, 64, 65, 67, 69, 71],
             durationBeats: 2,
             finalizedAt: 6_215_000
         )))
-        let returned = try XCTUnwrap(engine.plan(for: motif(
-            id: 4,
-            pitches: [64, 67, 69],
-            finalizedAt: 8_215_000
-        )))
 
         XCTAssertEqual(echo.conversationLineage?.relationship, .echo)
-        XCTAssertEqual(sequence.conversationLineage?.relationship, .sequence)
-        XCTAssertEqual(augmentation.conversationLineage?.relationship, .augmentation)
-        XCTAssertEqual(returned.conversationLineage?.relationship, .originalReturn)
-        XCTAssertEqual(returned.conversationLineage?.originMotifID, 1)
-        XCTAssertEqual(returned.conversationLineage?.sourceMotifID, 4)
-        XCTAssertEqual(returned.conversationLineage?.generation, 3)
-        XCTAssertEqual(
-            returned.phrase.messages.filter { $0.kind == .noteOn }.map(\.note),
-            [50, 53, 55]
-        )
-        XCTAssertEqual(returned.conversationLineage?.originGesture.map(\.note), [62, 65, 67])
-        XCTAssertEqual(returned.conversationLineage?.responseGesture.map(\.note), [50, 53, 55])
+        XCTAssertEqual(second.conversationLineage?.originMotifID, 1)
+        XCTAssertEqual(third.conversationLineage?.originMotifID, 1)
+        XCTAssertEqual(echo.conversationLineage?.generation, 0)
+        XCTAssertEqual(second.conversationLineage?.generation, 1)
+        XCTAssertEqual(third.conversationLineage?.generation, 2)
+        XCTAssertEqual(third.conversationLineage?.originGesture.map(\.note), [62, 65, 67])
+        XCTAssertFalse(third.conversationLineage?.responseGesture.isEmpty ?? true)
     }
 
     func testPreparedRemoteCandidateNeverBlocksAndKeepsFutureOnset() throws {
@@ -129,7 +119,7 @@ final class ConversationEngineTests: XCTestCase {
 
         XCTAssertEqual(plan.decisionSource, .jev)
         XCTAssertEqual(plan.conversationLineage?.relationship, .inversion)
-        XCTAssertEqual(plan.phrase.startMicroseconds, 3_000_000)
+        XCTAssertEqual(plan.phrase.startMicroseconds, 2_500_000)
     }
 
     func testRemoteDeadlineExpiresRevisionAndUsesLocalCandidate() throws {
@@ -145,15 +135,15 @@ final class ConversationEngineTests: XCTestCase {
         )
 
         XCTAssertNil(engine.submit(motif(), availableAtMicroseconds: 2_215_000))
-        XCTAssertNil(engine.advance(through: 2_899_999))
-        let plan = try XCTUnwrap(engine.advance(through: 2_900_000))
+        XCTAssertNil(engine.advance(through: 2_399_999))
+        let plan = try XCTUnwrap(engine.advance(through: 2_400_000))
 
         XCTAssertEqual(plan.decisionSource, .fallback)
         XCTAssertEqual(plan.conversationLineage?.relationship, .echo)
         XCTAssertEqual(provider.expiredRevisions, [1])
     }
 
-    func testHumanReentryExpiresPendingRemoteResponse() throws {
+    func testHumanAttackDoesNotErasePendingPhraseDecision() throws {
         let provider = DeferredConversationProvider()
         var engine = ConversationEngine(
             musicalStateConfiguration: try MusicalStateConfiguration(
@@ -169,8 +159,9 @@ final class ConversationEngineTests: XCTestCase {
         engine.yieldToHuman()
         provider.complete(revision: 1, candidateID: "inversion")
 
-        XCTAssertNil(engine.advance(through: 3_500_000))
-        XCTAssertEqual(provider.expiredRevisions, [1])
+        let plan = try XCTUnwrap(engine.advance(through: 2_300_000))
+        XCTAssertEqual(plan.conversationLineage?.relationship, .inversion)
+        XCTAssertTrue(provider.expiredRevisions.isEmpty)
     }
 
     func testConversationMemoryAdvancesOnlyAfterCommittedNoteOn() throws {

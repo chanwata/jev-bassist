@@ -52,6 +52,7 @@ public struct PhraseSegmenter: Sendable {
     public let musicalStateConfiguration: MusicalStateConfiguration
     public let maximumPendingNotes: Int
     public let simultaneityWindowMicroseconds: UInt64
+    public let maximumContinuousNotes: Int
 
     private var pendingNotes: [PerformedNote] = []
     private var lastAdvanceOffset: UInt64?
@@ -60,12 +61,15 @@ public struct PhraseSegmenter: Sendable {
     public init(
         musicalStateConfiguration: MusicalStateConfiguration,
         maximumPendingNotes: Int = 64,
-        simultaneityWindowMicroseconds: UInt64 = 40_000
+        simultaneityWindowMicroseconds: UInt64 = 40_000,
+        maximumContinuousNotes: Int = 32
     ) {
         precondition((2...512).contains(maximumPendingNotes))
+        precondition((2...maximumPendingNotes).contains(maximumContinuousNotes))
         self.musicalStateConfiguration = musicalStateConfiguration
         self.maximumPendingNotes = maximumPendingNotes
         self.simultaneityWindowMicroseconds = simultaneityWindowMicroseconds
+        self.maximumContinuousNotes = maximumContinuousNotes
     }
 
     public mutating func ingest(
@@ -109,6 +113,11 @@ public struct PhraseSegmenter: Sendable {
         through offsetMicroseconds: UInt64,
         hasActiveNotes: Bool
     ) -> [PhraseObservation] {
+        if pendingNotes.count >= maximumContinuousNotes,
+           let lastRelease = pendingNotes.map(\.releaseMicroseconds).max(),
+           offsetMicroseconds >= lastRelease {
+            return [finalize(at: lastRelease, boundaryConfidence: 0.65)]
+        }
         guard !hasActiveNotes,
               let lastRelease = pendingNotes.map(\.releaseMicroseconds).max() else {
             return []

@@ -549,6 +549,8 @@
     let renderedBeat = -1;
     let renderedBeatsPerBar = 0;
     let highestVisualEventID = 0;
+    let currentSessionID = null;
+    let clockAnchorPerformance = null;
     let viewportWidth = 0;
     let viewportHeight = 0;
     let previousFrame = performance.now();
@@ -611,6 +613,22 @@
     }
 
     function applyState(next) {
+      if (currentSessionID !== next.sessionID) {
+        currentSessionID = next.sessionID;
+        highestVisualEventID = 0;
+        pendingEvents.splice(0);
+        activeNotes.clear();
+        phraseFields.clear();
+        humanTrace.splice(0);
+        visualBursts.splice(0);
+        clockAnchorPerformance = next.startedAtUnixMilliseconds == null
+          ? null
+          : performance.now() - Math.max(0, Date.now() - next.startedAtUnixMilliseconds);
+      }
+      if (clockAnchorPerformance == null && next.startedAtUnixMilliseconds != null) {
+        clockAnchorPerformance = performance.now()
+          - Math.max(0, Date.now() - next.startedAtUnixMilliseconds);
+      }
       state = next;
       ingestVisualEvents(next.visualEvents ?? []);
       ui.connection.classList.add('online');
@@ -649,13 +667,20 @@
     }
 
     function triggerVisualEvent(event, now) {
-      const key = `${event.performer}:${event.note}`;
+      if (event.kind === 'cancel') {
+        if (event.responseID != null) phraseFields.delete(event.responseID);
+        return;
+      }
+      const eventNow = now - Math.max(0, Date.now() - event.atUnixMilliseconds);
+      const key = event.noteID == null
+        ? `${event.performer}:${event.note}`
+        : `${event.performer}:${event.noteID}`;
       if (event.kind === 'noteOn' && event.velocity > 0) {
-        activeNotes.set(key, {...event, startedAt: now});
+        activeNotes.set(key, {...event, startedAt: eventNow});
         const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
         const energy = Math.max(.15, event.velocity / 127) * performerGain(event.performer);
         visualBursts.push({
-          startedAt: now,
+          startedAt: eventNow,
           x: (event.performer === 'human' ? .14 : .86) * viewportWidth,
           y: (.15 + (1 - pitch) * .7) * viewportHeight,
           energy,
@@ -664,7 +689,7 @@
         if (visualBursts.length > 32) visualBursts.shift();
         fieldFlash = Math.min(1, fieldFlash + energy * (event.performer === 'human' ? .45 : .62));
         if (event.performer === 'human') {
-          humanTrace.push({startedAt: now, note: event.note, energy});
+          humanTrace.push({startedAt: eventNow, note: event.note, energy});
           if (humanTrace.length > 48) humanTrace.shift();
         }
         if (event.performer === 'companion' && event.originMotifID != null) {
@@ -673,20 +698,23 @@
           const response = event.responseID ?? event.id;
           const existing = phraseFields.get(response);
           const signal = existing ?? {
-            startedAt: now,
-            lastAt: now,
+            startedAt: eventNow,
+            lastAt: eventNow,
             origin: event.originMotifID,
             response,
             parent: event.parentResponseID,
             generation,
             relationship,
+            intent: event.intent ?? 'continueIdea',
+            interaction: event.interaction ?? 'ambiguous',
+            interactionConfidence: event.interactionConfidence ?? 0,
             energy: 0,
             revealed: 0,
             originGesture: event.originGesture ?? [],
             sourceGesture: event.sourceGesture ?? [],
             responseGesture: event.responseGesture ?? []
           };
-          signal.lastAt = now;
+          signal.lastAt = eventNow;
           signal.energy = Math.max(signal.energy * .72, energy);
           signal.revealed = Math.min(
             signal.responseGesture.length,
@@ -882,12 +910,12 @@
       }
     }
 
-    function gestureCoordinates(points, bounds, xStart, xEnd) {
+    function gestureCoordinates(points, bounds, xStart, xEnd, fixedMaximumTime = null) {
       if (!points?.length) return [];
-      const maximumTime = Math.max(
-        .25,
-        ...points.map(point => point.relativeOnsetBeats + point.durationBeats)
-      );
+      const maximumTime = fixedMaximumTime ?? Math.max(
+          .25,
+          ...points.map(point => point.relativeOnsetBeats + point.durationBeats)
+        );
       const span = Math.max(5, bounds.maximumNote - bounds.minimumNote);
       return points.map(point => ({
         x: xStart + point.relativeOnsetBeats / maximumTime * (xEnd - xStart),
@@ -958,17 +986,37 @@
         }
         const progress = Math.min(1, age / motion.life);
         const fade = Math.pow(1 - Math.max(0, (now - signal.lastAt) / motion.life), 1.4);
-        const sourceGesture = signal.relationship === 'originalReturn'
-          ? signal.originGesture
-          : (signal.sourceGesture.length ? signal.sourceGesture : signal.originGesture);
+        const sourceGesture = signal.sourceGesture.length
+          ? signal.sourceGesture
+          : signal.originGesture;
         const responseGesture = signal.responseGesture.slice(0, signal.revealed);
         const allNotes = [...sourceGesture, ...signal.responseGesture].map(point => point.note);
         const bounds = {
           minimumNote: Math.min(...allNotes, 48) - 2,
           maximumNote: Math.max(...allNotes, 60) + 2
         };
-        const source = gestureCoordinates(sourceGesture, bounds, viewportWidth * .08, viewportWidth * .49);
-        const response = gestureCoordinates(responseGesture, bounds, viewportWidth * .51, viewportWidth * .92);
+        const sourceTime = Math.max(
+          .25,
+          ...sourceGesture.map(point => point.relativeOnsetBeats + point.durationBeats)
+        );
+        const responseTime = Math.max(
+          .25,
+          ...signal.responseGesture.map(point => point.relativeOnsetBeats + point.durationBeats)
+        );
+        const source = gestureCoordinates(
+          sourceGesture,
+          bounds,
+          viewportWidth * .08,
+          viewportWidth * .49,
+          sourceTime
+        );
+        const response = gestureCoordinates(
+          responseGesture,
+          bounds,
+          viewportWidth * .51,
+          viewportWidth * .92,
+          responseTime
+        );
         const drift = Math.sin(now * .00023 + signal.generation * .7) * motion.spread * motion.drift;
 
         context.shadowBlur = 0;
@@ -1067,9 +1115,9 @@
     }
 
     function updateClock(now) {
-      if (!state?.running || state.startedAtUnixMilliseconds == null) return {beatProgress: 0, absoluteBeat: 0};
+      if (!state?.running || clockAnchorPerformance == null) return {beatProgress: 0, absoluteBeat: 0};
       const beatMs = 60000 / state.tempoBPM;
-      const elapsed = Math.max(0, now - state.startedAtUnixMilliseconds);
+      const elapsed = Math.max(0, now - clockAnchorPerformance);
       const absoluteBeat = Math.floor(elapsed / beatMs);
       const beatProgress = (elapsed % beatMs) / beatMs;
       const beat = absoluteBeat % state.beatsPerBar + 1;
@@ -1109,7 +1157,7 @@
       previousFrame = frameNow;
       sampleAudio();
       consumeVisualEvents(now);
-      const clock = updateClock(now);
+      const clock = updateClock(frameNow);
       evolveMembrane(now, deltaSeconds);
       drawMembrane(now, clock.beatProgress, clock.absoluteBeat, deltaSeconds);
       requestAnimationFrame(render);
@@ -1189,7 +1237,7 @@
     }
 
     ui.armButton.addEventListener('click', () => command('start'));
-    ui.audioButton.addEventListener('click', toggleAudio);
+    ui.audioButton.addEventListener('click', () => toggleAudio(false));
     ui.resetButton.addEventListener('click', () => command('stop'));
     ui.humanVolume.addEventListener('input', event => queueVolume('human', event.target.value));
     ui.companionVolume.addEventListener('input', event => queueVolume('companion', event.target.value));

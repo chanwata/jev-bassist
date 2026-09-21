@@ -89,6 +89,31 @@ final class PhraseMemoryTests: XCTestCase {
         XCTAssertEqual(memory.motifs.map(\.id), [2, 3])
     }
 
+    func testContinuousPlayingEmitsBoundedObservationWithoutSilence() throws {
+        let configuration = try MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4)
+        var segmenter = PhraseSegmenter(
+            musicalStateConfiguration: configuration,
+            maximumPendingNotes: 64,
+            maximumContinuousNotes: 4
+        )
+        try segmenter.ingest(completedNotes: [
+            note(id: 1, pitch: 60, velocity: 80, onset: 0, release: 100_000),
+            note(id: 2, pitch: 62, velocity: 80, onset: 90_000, release: 200_000),
+            note(id: 3, pitch: 64, velocity: 80, onset: 190_000, release: 300_000),
+            note(id: 4, pitch: 65, velocity: 80, onset: 290_000, release: 400_000)
+        ])
+
+        let observation = try XCTUnwrap(
+            segmenter.advance(through: 410_000, hasActiveNotes: true).first
+        )
+
+        XCTAssertEqual(observation.notes.count, 4)
+        XCTAssertEqual(observation.boundaryConfidence, 0.65)
+        XCTAssertTrue(
+            try segmenter.advance(through: 500_000, hasActiveNotes: true).isEmpty
+        )
+    }
+
     private func note(
         id: UInt64,
         pitch: UInt8,

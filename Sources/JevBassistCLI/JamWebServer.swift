@@ -4,23 +4,31 @@ import JevBassistCore
 import Network
 
 struct JamVisualEvent: Codable, Sendable {
+    let sessionID: String
     let id: UInt64
+    let noteID: UInt64?
     let performer: String
     let kind: String
     let note: UInt8
     let velocity: UInt8
     let atUnixMilliseconds: Double
     let originMotifID: UInt64?
+    let sourceMotifID: UInt64?
+    let developmentSourceMotifID: UInt64?
     let responseID: UInt64?
     let parentResponseID: UInt64?
     let generation: Int?
     let relationship: String?
+    let intent: String?
+    let interaction: String?
+    let interactionConfidence: Double?
     let originGesture: [ConversationGesturePoint]?
     let sourceGesture: [ConversationGesturePoint]?
     let responseGesture: [ConversationGesturePoint]?
 }
 
 struct JamWebState: Codable, Sendable {
+    let sessionID: String
     let running: Bool
     let tempoBPM: Double
     let beatsPerBar: Int

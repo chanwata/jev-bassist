@@ -22,7 +22,7 @@ final class SessionEvaluationTests: XCTestCase {
             try SessionEvaluationCodec.encode(first),
             try SessionEvaluationCodec.encode(second)
         )
-        XCTAssertEqual(first.formatVersion, 2)
+        XCTAssertEqual(first.formatVersion, 3)
         XCTAssertEqual(first.policy, .rules)
         XCTAssertEqual(first.input, fixture)
         XCTAssertEqual(first.configuration.style, .fugue)
