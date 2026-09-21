@@ -862,11 +862,16 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             velocity: event.velocity
         )
         do {
+            let update = try engine.ingest(sessionEvent)
+            let yieldingToHuman = event.kind == .noteOn && event.velocity > 0
+            if yieldingToHuman {
+                engine.yieldToHuman()
+            }
             try process(
-                engine.ingest(sessionEvent),
+                update,
                 anchorHostTime: anchorHostTime,
                 currentOffsetMicroseconds: offset,
-                yieldingToHuman: event.kind == .noteOn && event.velocity > 0
+                yieldingToHuman: yieldingToHuman
             )
             if options.webUI {
                 appendVisualEvent(
