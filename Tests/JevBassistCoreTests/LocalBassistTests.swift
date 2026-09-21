@@ -379,6 +379,79 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(forgotten.expression, .quiet)
     }
 
+    func testFugueGeneratorAnswersOnDominantWithContraryCountersubject() throws {
+        let result = FuguePhraseGenerator(outputChannel: 2).generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .follow,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            nextChord: nil,
+            barIndex: 4,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            memory: HumanPhraseMemory(
+                notes: [
+                    HumanPhraseNote(note: 60, velocity: 88, positionBeats: 0),
+                    HumanPhraseNote(note: 62, velocity: 84, positionBeats: 0.5),
+                    HumanPhraseNote(note: 64, velocity: 82, positionBeats: 1),
+                    HumanPhraseNote(note: 67, velocity: 78, positionBeats: 1.5)
+                ]
+            ),
+            previousNotes: [],
+            humanAverageVelocity: 82
+        )
+
+        let noteOns = result.phrase.messages.filter { $0.kind == .noteOn }
+        let subject = noteOns.filter { $0.note >= 55 }
+        let counter = noteOns.filter { $0.note < 55 }
+        XCTAssertEqual(subject.map(\.note), [67, 69, 71, 74])
+        XCTAssertEqual(subject.map(\.offsetMicroseconds), [250_000, 500_000, 750_000, 1_000_000])
+        XCTAssertEqual(counter.map(\.note), [48, 44])
+        XCTAssertTrue(noteOns.allSatisfy { $0.channel == 2 })
+        XCTAssertGreaterThan(result.expression.activity, 0.7)
+        XCTAssertGreaterThan(result.expression.memory, 0.8)
+    }
+
+    func testFugueGeneratorCanInvertTheSubject() throws {
+        let result = FuguePhraseGenerator(outputChannel: 2).generate(
+            decision: BassDecision(
+                activity: .normal,
+                relationship: .contrast,
+                motion: .approach,
+                fill: false,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .minor, confidence: 1),
+            nextChord: nil,
+            barIndex: 5,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(),
+            memory: HumanPhraseMemory(
+                notes: [
+                    HumanPhraseNote(note: 60, velocity: 80, positionBeats: 0),
+                    HumanPhraseNote(note: 62, velocity: 80, positionBeats: 0.5),
+                    HumanPhraseNote(note: 65, velocity: 80, positionBeats: 1)
+                ]
+            ),
+            previousNotes: [],
+            humanAverageVelocity: nil
+        )
+
+        XCTAssertEqual(
+            result.phrase.messages
+                .filter { $0.kind == .noteOn && $0.note >= 55 }
+                .map(\.note),
+            [67, 65, 62]
+        )
+    }
+
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {
         let phrase = BassPhraseGenerator(outputChannel: 3).generate(
             decision: BassDecision(

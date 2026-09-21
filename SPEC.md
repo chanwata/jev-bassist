@@ -33,7 +33,7 @@ Jev is a decision maker, not a note generator. Its future typed output should re
 
 The exact schema will be fixed only after a rule-based bassist can already complete a live session.
 
-The local renderer may interpret those axes as a bass pocket, an ambient ensemble response, or a transformed memory of the human's recent motif. Memory responses preserve recognizable contour and relative timing, enter only after a deliberate breath, and decay to silence when the player stops supplying new material. Jev still never chooses individual notes.
+The local renderer may interpret those axes as a bass pocket, an ambient ensemble response, a transformed memory of the human's recent motif, or a compact imitative counterpoint response. Memory responses preserve recognizable contour and relative timing, enter only after a deliberate breath, and decay to silence when the player stops supplying new material. Fugue responses state a bounded subject on the dominant and may add one lower contrary-motion voice; Jev still never chooses individual notes.
 
 ## Architecture
 
@@ -120,13 +120,15 @@ The primary human evaluation is a short rating of “this felt like another play
 - report timing and decision stability;
 - conduct live A/B sessions focused on perceived responsiveness.
 
-### M6–M8: Ambient, mix, and memory ensemble
+### M6–M9: Ambient, mix, memory, and imitative ensemble
 
 - render sparse sustained ambient voicings from the same bounded decisions;
 - expose independent human and companion channel volume controls;
 - preserve a recent human motif and return a delayed transformed trace for at most two silent bars;
 - derive shared memory, tension, activity, and resonance values from each local plan;
 - drive one persistent membrane visual from those values and the authoritative MIDI timeline.
+- render a recent human subject as a deterministic dominant answer with optional two-voice counterpoint;
+- amplify membrane displacement and mirror imitative answers so live musical changes are visually legible.
 
 ## Out of scope for the early MVP
 

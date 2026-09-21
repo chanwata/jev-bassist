@@ -43,6 +43,17 @@ final class JevDecisionProviderTests: XCTestCase {
         XCTAssertTrue(request.questions.motion.instructions.contains("transformation"))
     }
 
+    func testFugueStyleUsesImitativeCounterpointQuestions() throws {
+        let request = JevSystemOneRequest(
+            input: makeInput(targetBarIndex: 7, style: .fugue)
+        )
+
+        XCTAssertEqual(request.state.accompanimentStyle, "fugue")
+        XCTAssertTrue(request.questions.activity.instructions.contains("Baroque-style"))
+        XCTAssertTrue(request.questions.relationship.instructions.contains("temporal"))
+        XCTAssertTrue(request.questions.motion.instructions.contains("contrapuntal"))
+    }
+
     func testClientMapsTypedAnswersAndLogsFullSecretFreeTrace() async throws {
         let response = makeResponse()
         let transport = StubTransport(response: response)
