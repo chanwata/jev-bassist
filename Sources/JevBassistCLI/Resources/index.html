@@ -117,13 +117,13 @@
       align-items: center;
       gap: 9px;
       max-width: min(340px, calc(100vw - 28px));
-      opacity: .2;
+      opacity: .1;
       pointer-events: auto;
       transition: opacity .2s ease;
       text-shadow: 0 1px 14px #080908;
     }
 
-    .clock:hover { opacity: .58; }
+    .clock:hover { opacity: .4; }
 
     .stream-labels { display: none; }
 
@@ -236,7 +236,7 @@
       border-radius: 8px;
       padding: 4px;
       background: transparent;
-      opacity: .12;
+      opacity: .06;
       pointer-events: auto;
       transition: width .18s ease, max-height .22s ease, opacity .2s ease, background .2s ease, border-color .2s ease;
     }
@@ -524,6 +524,8 @@
     const pendingEvents = [];
     const activeNotes = new Map();
     const visualBursts = [];
+    const lineageSignals = [];
+    const lineageForms = new Map();
     const volumeTimers = {};
     const membrane = {positions: [], velocities: [], bands: 15, nodes: 120};
     let state = null;
@@ -643,7 +645,25 @@
           performer: event.performer
         });
         if (visualBursts.length > 32) visualBursts.shift();
-        fieldFlash = Math.min(1, fieldFlash + energy * .72);
+        fieldFlash = Math.min(1, fieldFlash + energy * (event.performer === 'human' ? .9 : 1.25));
+        if (event.performer === 'companion' && event.originMotifID != null) {
+          const relationship = event.relationship ?? 'echo';
+          const generation = event.generation ?? 0;
+          const signal = {
+            startedAt: now,
+            origin: event.originMotifID,
+            response: event.responseID ?? event.id,
+            parent: event.parentResponseID,
+            generation,
+            relationship,
+            pitch,
+            energy
+          };
+          lineageSignals.push(signal);
+          if (lineageSignals.length > 40) lineageSignals.shift();
+          lineageForms.set(event.originMotifID, signal);
+          if (relationship === 'originalReturn') fieldFlash = 1;
+        }
       } else {
         activeNotes.delete(key);
       }
@@ -819,6 +839,84 @@
       context.restore();
     }
 
+    function relationshipShape(relationship) {
+      switch (relationship) {
+        case 'sequence': return {points: 7, twist: .9, stretch: 1.7};
+        case 'inversion': return {points: 4, twist: -1.4, stretch: 1};
+        case 'fragmentation': return {points: 11, twist: 2.4, stretch: .72};
+        case 'augmentation': return {points: 6, twist: .25, stretch: 2.25};
+        case 'originalReturn': return {points: 3, twist: 0, stretch: 2.8};
+        case 'tailVariation': return {points: 5, twist: 1.2, stretch: 1.15};
+        default: return {points: 8, twist: .45, stretch: 1};
+      }
+    }
+
+    function drawLineageForms(now, beatProgress) {
+      context.save();
+      context.globalCompositeOperation = 'screen';
+      for (let index = lineageSignals.length - 1; index >= 0; index--) {
+        const signal = lineageSignals[index];
+        const age = now - signal.startedAt;
+        if (age > 5200) {
+          lineageSignals.splice(index, 1);
+          continue;
+        }
+        const progress = age / 5200;
+        const shape = relationshipShape(signal.relationship);
+        const seed = (signal.origin * 0.61803398875) % 1;
+        const centerX = viewportWidth * (.5 + Math.sin(seed * 9 + signal.generation) * .08);
+        const centerY = viewportHeight * (.18 + (1 - signal.pitch) * .64);
+        const base = Math.min(viewportWidth, viewportHeight) * (.12 + signal.energy * .18);
+        const radius = base * shape.stretch * (1 + progress * 1.45);
+        const alpha = Math.pow(1 - progress, 1.35) * (.38 + signal.energy * .5);
+        const rotation = seed * Math.PI * 2
+          + beatProgress * Math.PI * 2 * shape.twist
+          + signal.generation * .37;
+
+        context.strokeStyle = signal.relationship === 'originalReturn'
+          ? `rgba(242,240,232,${alpha})`
+          : `rgba(200,255,69,${alpha})`;
+        context.fillStyle = `rgba(200,255,69,${alpha * .055})`;
+        context.lineWidth = 1.5 + signal.energy * 6 * (1 - progress);
+        context.shadowColor = `rgba(200,255,69,${alpha})`;
+        context.shadowBlur = 28 + signal.energy * 72;
+        context.beginPath();
+        for (let point = 0; point <= shape.points; point++) {
+          const angle = rotation + point / shape.points * Math.PI * 2;
+          const alternate = point % 2 ? .56 : 1;
+          const fragmentation = signal.relationship === 'fragmentation'
+            ? .62 + ((point * 37 + signal.generation) % 5) * .1
+            : alternate;
+          const r = radius * fragmentation;
+          const x = centerX + Math.cos(angle) * r;
+          const y = centerY + Math.sin(angle) * r * (.64 + seed * .3);
+          if (point === 0) context.moveTo(x, y);
+          else context.lineTo(x, y);
+        }
+        context.closePath();
+        context.fill();
+        context.stroke();
+
+        context.lineWidth = Math.max(1, 4 * (1 - progress));
+        context.strokeStyle = `rgba(242,240,232,${alpha * .48})`;
+        context.beginPath();
+        context.moveTo(viewportWidth * .12, centerY + Math.sin(rotation) * radius * .2);
+        context.quadraticCurveTo(
+          centerX,
+          centerY - radius * (signal.relationship === 'inversion' ? -.72 : .72),
+          viewportWidth * .88,
+          centerY
+        );
+        context.stroke();
+
+        if (signal.relationship === 'originalReturn') {
+          context.fillStyle = `rgba(242,240,232,${alpha * .09})`;
+          context.fillRect(0, 0, viewportWidth, viewportHeight);
+        }
+      }
+      context.restore();
+    }
+
     function drawMembrane(now, beatProgress, absoluteBeat) {
       const memory = expression('expressionMemory', 0);
       const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
@@ -828,6 +926,7 @@
       context.fillStyle = `rgba(8,9,8,${Math.max(.055, fade)})`;
       context.fillRect(0, 0, viewportWidth, viewportHeight);
       drawBursts(now);
+      drawLineageForms(now, beatProgress);
 
       const gradient = context.createLinearGradient(0, 0, viewportWidth, 0);
       gradient.addColorStop(0, `rgba(242,240,232,${.22 + activity * .28})`);
@@ -896,7 +995,7 @@
           ui.caption.textContent = state.style === 'memory'
             ? 'Your gesture bends the left field; its transformed memory returns from the right.'
             : state.style === 'fugue'
-              ? 'Your subject persists while the right field develops it and eventually returns.'
+              ? 'One captured gesture branches through the field, then converges on its origin.'
               : `Your notes and ${state.style} responses deform the same field.`;
         }
       }

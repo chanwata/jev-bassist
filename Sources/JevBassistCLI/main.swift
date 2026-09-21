@@ -680,6 +680,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private let stateHandler: @Sendable (JamWebState) -> Void
     private var engine: LocalBassistEngine
     private var scheduler: RollingMIDIScheduler
+    private var schedulerLineage: [UInt64: ConversationLineage] = [:]
     private var anchorHostTime: UInt64?
     private var startedAt: Date?
     private var timer: DispatchSourceTimer?
@@ -964,7 +965,14 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             lastTonalCenter = plan.tonalCenterPitchClass.map(pitchClassName)
             lastExpression = plan.expression
             if !plan.phrase.messages.isEmpty {
-                scheduler.submit(plan.phrase.messages)
+                let revision = scheduler.submit(plan.phrase.messages)
+                if let lineage = plan.conversationLineage {
+                    schedulerLineage[revision] = lineage
+                    if schedulerLineage.count > 64,
+                       let oldest = schedulerLineage.keys.min() {
+                        schedulerLineage.removeValue(forKey: oldest)
+                    }
+                }
             }
         }
         if yieldingToHuman {
@@ -1005,7 +1013,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                     note: message.note,
                     velocity: message.velocity,
                     sessionOffsetMicroseconds: message.offsetMicroseconds
-                        + Self.outputSafetyOffsetMicroseconds
+                        + Self.outputSafetyOffsetMicroseconds,
+                    lineage: schedulerLineage[event.revision]
                 )
             }
         }
@@ -1090,7 +1099,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         kind: String,
         note: UInt8,
         velocity: UInt8,
-        sessionOffsetMicroseconds: UInt64
+        sessionOffsetMicroseconds: UInt64,
+        lineage: ConversationLineage? = nil
     ) {
         guard let startedAt else {
             return
@@ -1103,7 +1113,12 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 note: note,
                 velocity: velocity,
                 atUnixMilliseconds: startedAt.timeIntervalSince1970 * 1_000
-                    + Double(sessionOffsetMicroseconds) / 1_000
+                    + Double(sessionOffsetMicroseconds) / 1_000,
+                originMotifID: lineage?.originMotifID,
+                responseID: lineage?.responseID,
+                parentResponseID: lineage?.parentResponseID,
+                generation: lineage?.generation,
+                relationship: lineage?.relationship.rawValue
             )
         )
         nextVisualEventID += 1
