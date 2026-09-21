@@ -37,7 +37,7 @@ public struct SessionEvaluationConfiguration: Codable, Equatable, Sendable {
 }
 
 public struct SessionEvaluationTrace: Codable, Equatable, Sendable {
-    public static let currentFormatVersion = 2
+    public static let currentFormatVersion = 3
     public static let supportedFormatVersions = 1...currentFormatVersion
 
     public let formatVersion: Int
@@ -50,6 +50,8 @@ public struct SessionEvaluationTrace: Codable, Equatable, Sendable {
     public let phraseObservations: [PhraseObservation]
     public let motifs: [Motif]
     public let performanceDiagnostics: [PerformanceTrackerDiagnostic]
+    public let scheduledMIDIEvents: [RollingMIDIEvent]
+    public let schedulerCancellations: [RollingMIDICancellation]
 
     public init(
         formatVersion: Int = currentFormatVersion,
@@ -61,7 +63,9 @@ public struct SessionEvaluationTrace: Codable, Equatable, Sendable {
         performedNotes: [PerformedNote] = [],
         phraseObservations: [PhraseObservation] = [],
         motifs: [Motif] = [],
-        performanceDiagnostics: [PerformanceTrackerDiagnostic] = []
+        performanceDiagnostics: [PerformanceTrackerDiagnostic] = [],
+        scheduledMIDIEvents: [RollingMIDIEvent] = [],
+        schedulerCancellations: [RollingMIDICancellation] = []
     ) throws {
         guard Self.supportedFormatVersions.contains(formatVersion) else {
             throw SessionEvaluationError.unsupportedFormatVersion(formatVersion)
@@ -76,6 +80,8 @@ public struct SessionEvaluationTrace: Codable, Equatable, Sendable {
         self.phraseObservations = phraseObservations
         self.motifs = motifs
         self.performanceDiagnostics = performanceDiagnostics
+        self.scheduledMIDIEvents = scheduledMIDIEvents
+        self.schedulerCancellations = schedulerCancellations
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -89,6 +95,8 @@ public struct SessionEvaluationTrace: Codable, Equatable, Sendable {
         case phraseObservations
         case motifs
         case performanceDiagnostics
+        case scheduledMIDIEvents
+        case schedulerCancellations
     }
 
     public init(from decoder: Decoder) throws {
@@ -115,6 +123,14 @@ public struct SessionEvaluationTrace: Codable, Equatable, Sendable {
             performanceDiagnostics: container.decodeIfPresent(
                 [PerformanceTrackerDiagnostic].self,
                 forKey: .performanceDiagnostics
+            ) ?? [],
+            scheduledMIDIEvents: container.decodeIfPresent(
+                [RollingMIDIEvent].self,
+                forKey: .scheduledMIDIEvents
+            ) ?? [],
+            schedulerCancellations: container.decodeIfPresent(
+                [RollingMIDICancellation].self,
+                forKey: .schedulerCancellations
             ) ?? []
         )
     }
@@ -180,9 +196,13 @@ public struct LocalBassistSessionEvaluator: Sendable {
         var phraseObservations: [PhraseObservation] = []
         var motifs: [Motif] = []
         var performanceDiagnostics: [PerformanceTrackerDiagnostic] = []
+        var scheduler = try RollingMIDIScheduler()
+        var schedulerLineage: [UInt64: ConversationLineage] = [:]
+        var pendingAcknowledgements: [(offset: UInt64, responseID: UInt64)] = []
+        var scheduledMIDIEvents: [RollingMIDIEvent] = []
+        var schedulerCancellations: [RollingMIDICancellation] = []
 
-        for event in fixture.events {
-            let update = try engine.ingest(event)
+        func collect(_ update: LocalBassistUpdate) {
             snapshots.append(contentsOf: update.snapshots)
             plans.append(contentsOf: update.plans)
             performedNotes.append(contentsOf: update.performedNotes)
@@ -190,13 +210,85 @@ public struct LocalBassistSessionEvaluator: Sendable {
             motifs.append(contentsOf: update.motifs)
             performanceDiagnostics.append(contentsOf: update.performanceDiagnostics)
         }
+
+        func schedule(_ newPlans: [BassBarPlan], at offset: UInt64) {
+            if !newPlans.isEmpty {
+                let cancellation = scheduler.yieldToHuman(at: offset)
+                if !cancellation.canceledEventIDs.isEmpty {
+                    schedulerCancellations.append(cancellation)
+                }
+                for revision in cancellation.canceledRevisions {
+                    if let lineage = schedulerLineage.removeValue(forKey: revision) {
+                        engine.discardUncommittedConversationResponse(
+                            responseID: lineage.responseID
+                        )
+                    }
+                }
+            }
+            for plan in newPlans where !plan.phrase.messages.isEmpty {
+                let revision = scheduler.submit(plan.phrase.messages)
+                if let lineage = plan.conversationLineage {
+                    schedulerLineage[revision] = lineage
+                }
+            }
+        }
+
+        func acknowledgeElapsed(through offset: UInt64) {
+            pendingAcknowledgements.sort { $0.offset < $1.offset }
+            let elapsedCount = pendingAcknowledgements.prefix {
+                $0.offset <= offset
+            }.count
+            guard elapsedCount > 0 else { return }
+            let elapsed = pendingAcknowledgements.prefix(elapsedCount)
+            pendingAcknowledgements.removeFirst(elapsedCount)
+            for acknowledgement in elapsed {
+                engine.acknowledgeElapsedConversationNote(
+                    responseID: acknowledgement.responseID
+                )
+            }
+        }
+
+        func commit(through offset: UInt64) throws {
+            acknowledgeElapsed(through: offset)
+            let due = try scheduler.drain(through: offset)
+            scheduledMIDIEvents.append(contentsOf: due)
+            for event in due where event.message.kind == .noteOn {
+                if let responseID = schedulerLineage[event.revision]?.responseID {
+                    pendingAcknowledgements.append(
+                        (event.message.offsetMicroseconds, responseID)
+                    )
+                }
+            }
+            acknowledgeElapsed(through: offset)
+        }
+
+        for event in fixture.events {
+            if event.offsetMicroseconds > 0 {
+                let clockOffset = event.offsetMicroseconds - 1
+                let clockUpdate = try engine.advance(through: clockOffset)
+                collect(clockUpdate)
+                schedule(clockUpdate.plans, at: clockOffset)
+                try commit(through: clockOffset)
+            }
+            let update = try engine.ingest(event)
+            if event.kind == .noteOn, event.velocity > 0 {
+                engine.yieldToHuman()
+            }
+            collect(update)
+            schedule(update.plans, at: event.offsetMicroseconds)
+            try commit(through: event.offsetMicroseconds)
+        }
         let finalUpdate = try engine.finish(through: fixture.durationMicroseconds)
-        snapshots.append(contentsOf: finalUpdate.snapshots)
-        plans.append(contentsOf: finalUpdate.plans)
-        performedNotes.append(contentsOf: finalUpdate.performedNotes)
-        phraseObservations.append(contentsOf: finalUpdate.phraseObservations)
-        motifs.append(contentsOf: finalUpdate.motifs)
-        performanceDiagnostics.append(contentsOf: finalUpdate.performanceDiagnostics)
+        collect(finalUpdate)
+        schedule(finalUpdate.plans, at: fixture.durationMicroseconds)
+        let plannedEnd = finalUpdate.plans
+            .flatMap(\.phrase.messages)
+            .map(\.offsetMicroseconds)
+            .max() ?? fixture.durationMicroseconds
+        // Evaluation is an offline comparison artifact, so retain the complete
+        // locally scheduled answer even when the input fixture ends just before
+        // that answer's onset. Live stop behavior still cancels pending output.
+        try commit(through: max(fixture.durationMicroseconds, plannedEnd))
 
         return try SessionEvaluationTrace(
             input: fixture,
@@ -207,7 +299,9 @@ public struct LocalBassistSessionEvaluator: Sendable {
             performedNotes: performedNotes,
             phraseObservations: phraseObservations,
             motifs: motifs,
-            performanceDiagnostics: performanceDiagnostics
+            performanceDiagnostics: performanceDiagnostics,
+            scheduledMIDIEvents: scheduledMIDIEvents,
+            schedulerCancellations: schedulerCancellations
         )
     }
 }

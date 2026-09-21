@@ -10,9 +10,16 @@ public struct JevConversationRequest: Codable, Equatable, Sendable {
     public init(input: ConversationSelectionInput, model: String = "jev-latest") {
         state = input
         self.model = model
+        let conversation = input.state.map {
+            "Intent \($0.intent.rawValue); turn \($0.turnState.rawValue); "
+                + "interaction \($0.interaction.kind.rawValue) confidence "
+                + "\($0.interaction.confidence); theme revision \($0.themeRevision). "
+                + "The latest human material follows shared theme \($0.sharedTheme.id) "
+                + "and previous response \($0.previousResponse?.id.description ?? "none")."
+        } ?? "No reliable reciprocal context is available; prefer a conservative answer."
         questions = [
             "response": JevChoiceQuestion(
-                instructions: "Choose one supplied one-voice response. Favor a traceable relationship to the player's phrase, coherent modal voice leading, a purposeful arrival, and room for the player. Treat pitches and timing as immutable local candidates; use return when divergence is high.",
+                instructions: "Choose one supplied one-voice response. \(conversation) Favor a traceable relationship to the shared material, coherent modal voice leading, a purposeful arrival, and room for the player. Treat pitches and timing as immutable local candidates; use return only for a settling intention or measured high divergence.",
                 criteria: Dictionary(uniqueKeysWithValues: input.candidates.map {
                     (
                         $0.id,

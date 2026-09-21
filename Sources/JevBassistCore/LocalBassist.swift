@@ -1799,6 +1799,7 @@ public struct LocalBassistEngine: Sendable {
         let snapshots = try tracker.ingest(event)
         performanceTracker = nextPerformanceTracker
         phraseSegmenter = nextPhraseSegmenter
+        observeConversationGestures(observationsBeforeEvent)
         let motifs = remember(observationsBeforeEvent)
         let conversationPlans = plans(
             for: motifs,
@@ -1821,6 +1822,7 @@ public struct LocalBassistEngine: Sendable {
         )
         let snapshots = try tracker.advance(through: offsetMicroseconds)
         phraseSegmenter = nextPhraseSegmenter
+        observeConversationGestures(observations)
         let motifs = remember(observations)
         let conversationPlans = plans(
             for: motifs,
@@ -1843,6 +1845,7 @@ public struct LocalBassistEngine: Sendable {
         let snapshots = try tracker.finish(through: offsetMicroseconds)
         performanceTracker = nextPerformanceTracker
         phraseSegmenter = nextPhraseSegmenter
+        observeConversationGestures(observations)
         let motifs = remember(observations)
         let conversationPlans = plans(
             for: motifs,
@@ -1867,11 +1870,23 @@ public struct LocalBassistEngine: Sendable {
     }
 
     public mutating func acknowledgeCommittedConversationNote(responseID: UInt64) {
-        conversationEngine?.acknowledgeCommittedResponseNote(responseID: responseID)
+        acknowledgeElapsedConversationNote(responseID: responseID)
+    }
+
+    public mutating func acknowledgeElapsedConversationNote(responseID: UInt64) {
+        conversationEngine?.acknowledgeElapsedResponseNote(responseID: responseID)
     }
 
     public mutating func discardUncommittedConversationResponse(responseID: UInt64) {
         conversationEngine?.discardUncommittedResponse(responseID: responseID)
+    }
+
+    private mutating func observeConversationGestures(_ observations: [PhraseObservation]) {
+        guard var conversationEngine else { return }
+        for observation in observations {
+            conversationEngine.observeHumanGesture(observation)
+        }
+        self.conversationEngine = conversationEngine
     }
 
     private mutating func makeUpdate(

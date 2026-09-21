@@ -11,6 +11,13 @@ final class JevConversationDecisionProviderTests: XCTestCase {
         XCTAssertEqual(request.state.revision, 7)
         XCTAssertEqual(Set(criteria.keys), Set(["echo", "inversion", "return"]))
         XCTAssertEqual(request.questions["response"]?.type, "choice")
+        XCTAssertEqual(request.state.state?.intent, .question)
+        XCTAssertEqual(request.state.state?.turnState, .awaitingReply)
+        XCTAssertTrue(
+            request.questions["response"]?.instructions.contains(
+                "previous response 9"
+            ) == true
+        )
     }
 
     func testClientAcceptsTypedCandidateAndTraceContainsNoSecret() async throws {
@@ -71,7 +78,42 @@ final class JevConversationDecisionProviderTests: XCTestCase {
                 summary(id: "inversion", relationship: .inversion),
                 summary(id: "return", relationship: .originalReturn)
             ],
-            localCandidateID: "inversion"
+            localCandidateID: "inversion",
+            state: conversationState()
+        )
+    }
+
+    private func conversationState() -> ConversationStateSummary {
+        func material(id: UInt64, pitches: [UInt8]) -> ConversationMaterialSummary {
+            ConversationMaterialSummary(
+                id: id,
+                response: pitches.enumerated().map { index, pitch in
+                    ConversationResponseNote(
+                        note: pitch,
+                        velocity: 72,
+                        relativeOnsetBeats: Double(index) * 0.5,
+                        durationBeats: 0.35
+                    )
+                }
+            )
+        }
+        return ConversationStateSummary(
+            themeRevision: 4,
+            intent: .question,
+            turnState: .awaitingReply,
+            interaction: InteractionEvidence(
+                kind: .imitation,
+                confidence: 0.84,
+                pitchContour: 0.9,
+                intervalShape: 0.8,
+                rhythm: 0.86,
+                duration: 0.7,
+                responseDelayBeats: 1.5
+            ),
+            origin: material(id: 1, pitches: [62, 65, 67]),
+            sharedTheme: material(id: 3, pitches: [64, 67, 69]),
+            latestHuman: material(id: 8, pitches: [67, 70, 72]),
+            previousResponse: material(id: 9, pitches: [65, 68, 70])
         )
     }
 

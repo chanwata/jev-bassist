@@ -4,23 +4,32 @@ import JevBassistCore
 import Network
 
 struct JamVisualEvent: Codable, Sendable {
+    let sessionID: String
     let id: UInt64
+    let noteID: UInt64?
     let performer: String
     let kind: String
     let note: UInt8
     let velocity: UInt8
+    let sessionOffsetMicroseconds: UInt64
     let atUnixMilliseconds: Double
     let originMotifID: UInt64?
+    let sourceMotifID: UInt64?
+    let developmentSourceMotifID: UInt64?
     let responseID: UInt64?
     let parentResponseID: UInt64?
     let generation: Int?
     let relationship: String?
+    let intent: String?
+    let interaction: String?
+    let interactionConfidence: Double?
     let originGesture: [ConversationGesturePoint]?
     let sourceGesture: [ConversationGesturePoint]?
     let responseGesture: [ConversationGesturePoint]?
 }
 
 struct JamWebState: Codable, Sendable {
+    let sessionID: String
     let running: Bool
     let tempoBPM: Double
     let beatsPerBar: Int
@@ -31,6 +40,7 @@ struct JamWebState: Codable, Sendable {
     let source: String
     let destination: String
     let startedAtUnixMilliseconds: Double?
+    let sessionElapsedMicroseconds: UInt64?
     let bar: Int?
     let beat: Int?
     let phase: String
@@ -60,11 +70,21 @@ protocol JamWebControlling: AnyObject, Sendable {
 /// A loopback-only HTTP/SSE bridge. It never handles MIDI inside a Network
 /// callback; commands are handed to JamSession's serial queue instead.
 final class JamWebServer: @unchecked Sendable {
+    private final class EventClient {
+        let connection: NWConnection
+        var isSending = false
+        var pendingFrame: Data?
+
+        init(connection: NWConnection) {
+            self.connection = connection
+        }
+    }
+
     private let queue = DispatchQueue(label: "dev.jev-bassist.web")
     private let listener: NWListener
     private let html: Data
     private let stopSignal: @Sendable () -> Void
-    private var clients: [UUID: NWConnection] = [:]
+    private var clients: [UUID: EventClient] = [:]
     private var latestState: Data?
     private weak var controller: (any JamWebControlling)?
 
@@ -102,7 +122,7 @@ final class JamWebServer: @unchecked Sendable {
 
     func stop() {
         queue.sync {
-            clients.values.forEach { $0.cancel() }
+            clients.values.forEach { $0.connection.cancel() }
             clients.removeAll()
             listener.cancel()
         }
@@ -118,12 +138,8 @@ final class JamWebServer: @unchecked Sendable {
             }
             latestState = data
             let frame = Self.eventFrame(data)
-            for (id, connection) in clients {
-                connection.send(content: frame, completion: .contentProcessed { [weak self] error in
-                    if error != nil {
-                        self?.queue.async { self?.removeClient(id) }
-                    }
-                })
+            for id in clients.keys {
+                enqueue(frame, for: id)
             }
         }
     }
@@ -222,7 +238,7 @@ final class JamWebServer: @unchecked Sendable {
 
     private func openEventStream(_ connection: NWConnection) {
         let id = UUID()
-        clients[id] = connection
+        clients[id] = EventClient(connection: connection)
         let headers = Data(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n".utf8
         )
@@ -230,11 +246,36 @@ final class JamWebServer: @unchecked Sendable {
         if let latestState {
             payload.append(Self.eventFrame(latestState))
         }
-        connection.send(content: payload, completion: .contentProcessed { [weak self] error in
-            if error != nil {
-                self?.queue.async { self?.removeClient(id) }
+        enqueue(payload, for: id)
+    }
+
+    /// One in-flight frame plus one replaceable latest snapshot per client.
+    /// A stalled browser can therefore never build an unbounded SSE backlog.
+    private func enqueue(_ frame: Data, for id: UUID) {
+        guard let client = clients[id] else { return }
+        guard !client.isSending else {
+            client.pendingFrame = frame
+            return
+        }
+        client.isSending = true
+        client.connection.send(
+            content: frame,
+            completion: .contentProcessed { [weak self] error in
+                self?.completeSend(for: id, error: error)
             }
-        })
+        )
+    }
+
+    private func completeSend(for id: UUID, error: NWError?) {
+        guard let client = clients[id] else { return }
+        if error != nil {
+            removeClient(id)
+            return
+        }
+        client.isSending = false
+        guard let next = client.pendingFrame else { return }
+        client.pendingFrame = nil
+        enqueue(next, for: id)
     }
 
     private func respond(
@@ -256,11 +297,11 @@ final class JamWebServer: @unchecked Sendable {
 
     private func remove(_ connection: NWConnection?) {
         guard let connection else { return }
-        clients = clients.filter { $0.value !== connection }
+        clients = clients.filter { $0.value.connection !== connection }
     }
 
     private func removeClient(_ id: UUID) {
-        clients.removeValue(forKey: id)?.cancel()
+        clients.removeValue(forKey: id)?.connection.cancel()
     }
 
     private static func eventFrame(_ json: Data) -> Data {
