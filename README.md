@@ -335,6 +335,8 @@ The output is a versioned, secret-free JSON trace containing the original input 
 
 The duration-aware memory pairs Note On/Off events, distinguishes observed releases from releases inferred at session end, groups simultaneous attacks, and uses adaptive silence to finalize phrases without splitting them at bar lines. A bounded immutable motif keeps relative onset, duration, rest, accent, and characteristic intervals. Low-confidence chord extraction is not promoted to a melody subject.
 
+Live accompaniment uses a 50 ms rolling MIDI horizon. A generated phrase may describe a longer response, but only events inside that horizon are handed to CoreMIDI. When the human re-enters, unsent companion Note On events and their paired releases are removed; releases belonging to already committed attacks remain scheduled. Full destination flush and channel silence remain reserved for explicit stop or failure.
+
 This evaluation command records the current engine faithfully; it does not make the current eight-stage fugue conversational. The next milestones add interruptible short-horizon scheduling, then replace the fixed development path with context-driven responses.
 
 ## Build and test
@@ -348,9 +350,9 @@ Pure MIDI decoding, fixture validation, replay, deterministic ensemble evaluatio
 
 ## Planned path
 
-1. Replace whole-bar output submission with a safe short-horizon scheduler that can reconsider unsent notes when the player re-enters.
-2. Replace the fixed fugue development with a one-voice modal response whose connection to the human motif is audible before adding further development.
-3. Add context-driven development and original-subject return only after the short response passes live listening evaluation.
-4. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
+1. Replace the fixed fugue development with a one-voice modal response whose connection to the human motif is audible before adding further development.
+2. Add context-driven development and original-subject return only after the short response passes live listening evaluation.
+3. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
+4. Carry motif lineage and confirmed scheduler events into the performance visual.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.

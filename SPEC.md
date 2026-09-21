@@ -153,6 +153,15 @@ The primary human evaluation is a short rating of “this felt like another play
 - add performed notes, phrase observations, diagnostics, and motifs to evaluation trace v2 while continuing to decode trace v1;
 - project a finalized motif into the legacy generator without yet replacing the fixed eight-stage fugue or whole-bar scheduler.
 
+### M12 P2: rolling MIDI commitment
+
+- keep complete generated plans in Core while committing only the next 50 ms of MIDI events to CoreMIDI;
+- assign stable event, revision, and paired-note identifiers before commitment;
+- on human re-entry, remove unsent Note On events and their paired Note Off events while retaining releases for attacks already handed to CoreMIDI;
+- keep overlapping attacks of the same channel/note independent so one cancellation cannot steal another attack's release;
+- publish companion visual events only after the corresponding MIDI event crosses the commitment horizon;
+- clear the internal queue on explicit stop, then use the existing destination flush and channel silence as the terminal safety action.
+
 ## Out of scope for the early MVP
 
 - audio transcription;
