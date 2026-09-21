@@ -343,6 +343,8 @@ After the first echo, development is selected from the live relationship rather 
 
 With `--brain jev`, the conversation engine sends one request only after a motif is complete. The request contains musical context plus the IDs and scores of the bounded local candidates; Jev cannot invent notes or MIDI events. The live queue polls the prepared result without waiting. A valid answer reserves a future shared beat, while timeout, low confidence, malformed output, an unknown ID, or a superseded revision selects the deterministic local candidate. Traces are written to stderr as `jev-conversation-trace` JSON without the API key.
 
+The browser field receives motif lineage only after the matching MIDI message crosses the 50 ms commitment horizon. Every origin keeps a stable visual identity: sequence stretches it, inversion mirrors it, fragmentation breaks its perimeter, augmentation expands it, and original return converges into a full-field pulse. The tiny clock and control affordance remain almost transparent until hover or keyboard focus.
+
 The evaluation command records this conversation path deterministically. The next milestones add context-driven development and original-subject return, then compare local and Jev candidate selection on the same traces.
 
 ## Build and test
@@ -356,7 +358,6 @@ Pure MIDI decoding, fixture validation, replay, deterministic ensemble evaluatio
 
 ## Planned path
 
-1. Carry motif lineage and confirmed scheduler events into the performance visual.
-2. Compare local and Jev candidate selection in repeated live sessions, reporting network timing separately from the intentional conversational breath.
+1. Compare local and Jev candidate selection in repeated live sessions, reporting network timing separately from the intentional conversational breath.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.

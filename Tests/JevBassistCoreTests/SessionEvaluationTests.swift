@@ -31,6 +31,8 @@ final class SessionEvaluationTests: XCTestCase {
         XCTAssertEqual(first.plans.map(\.developmentStage), [nil])
         XCTAssertFalse(first.plans[0].phrase.messages.isEmpty)
         XCTAssertEqual(first.plans[0].phrase.startMicroseconds, 4_500_000)
+        XCTAssertEqual(first.plans[0].conversationLineage?.originMotifID, 1)
+        XCTAssertEqual(first.plans[0].conversationLineage?.relationship, .echo)
         XCTAssertEqual(first.performedNotes.count, 4)
         XCTAssertEqual(
             first.performedNotes.map(\.durationMicroseconds),

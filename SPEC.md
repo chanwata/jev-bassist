@@ -190,6 +190,14 @@ The primary human evaluation is a short rating of “this felt like another play
 - use the local candidate at the musical deadline for timeout, low confidence, invalid output, transport failure, or an unknown candidate ID;
 - emit a complete secret-free decision trace separate from MIDI timing diagnostics.
 
+### M12 P6: committed lineage visual
+
+- associate each submitted response revision with its origin motif, source response, parent, generation, and transformation;
+- publish lineage only when the rolling scheduler actually commits the corresponding MIDI message;
+- render stable origin-seeded forms whose geometry changes materially for sequence, inversion, fragmentation, augmentation, and return;
+- make original return visibly converge and flash across the field while preserving motion-reduction behavior;
+- keep clock and controls nearly invisible until hover or focus so the performance remains the primary surface.
+
 ## Out of scope for the early MVP
 
 - audio transcription;

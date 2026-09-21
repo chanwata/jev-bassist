@@ -9,6 +9,11 @@ struct JamVisualEvent: Codable, Sendable {
     let note: UInt8
     let velocity: UInt8
     let atUnixMilliseconds: Double
+    let originMotifID: UInt64?
+    let responseID: UInt64?
+    let parentResponseID: UInt64?
+    let generation: Int?
+    let relationship: String?
 }
 
 struct JamWebState: Codable, Sendable {
