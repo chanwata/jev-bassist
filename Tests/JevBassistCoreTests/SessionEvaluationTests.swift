@@ -30,7 +30,7 @@ final class SessionEvaluationTests: XCTestCase {
         XCTAssertEqual(first.plans.count, 1)
         XCTAssertEqual(first.plans.map(\.developmentStage), [nil])
         XCTAssertFalse(first.plans[0].phrase.messages.isEmpty)
-        XCTAssertEqual(first.plans[0].phrase.startMicroseconds, 4_500_000)
+        XCTAssertEqual(first.plans[0].phrase.startMicroseconds, 4_250_000)
         XCTAssertEqual(first.plans[0].conversationLineage?.originMotifID, 1)
         XCTAssertEqual(first.plans[0].conversationLineage?.relationship, .echo)
         XCTAssertEqual(first.performedNotes.count, 4)
@@ -53,6 +53,11 @@ final class SessionEvaluationTests: XCTestCase {
             [0, 0.28, 0.32, 0.52]
         )
         XCTAssertTrue(first.performanceDiagnostics.isEmpty)
+        XCTAssertFalse(first.scheduledMIDIEvents.isEmpty)
+        XCTAssertEqual(
+            first.scheduledMIDIEvents.filter { $0.message.kind == .noteOn }.count,
+            first.plans[0].phrase.messages.filter { $0.kind == .noteOn }.count
+        )
         XCTAssertTrue(
             first.plans.flatMap { $0.phrase.messages }.allSatisfy { $0.channel == 3 }
         )
@@ -128,6 +133,27 @@ final class SessionEvaluationTests: XCTestCase {
         XCTAssertTrue(decoded.phraseObservations.isEmpty)
         XCTAssertTrue(decoded.motifs.isEmpty)
         XCTAssertTrue(decoded.performanceDiagnostics.isEmpty)
+    }
+
+    func testEvaluationCodecReadsVersionTwoTraceWithoutSchedulerFields() throws {
+        let trace = try LocalBassistSessionEvaluator().evaluate(
+            fixture: loadFixture(),
+            configuration: fugueConfiguration()
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SessionEvaluationCodec.encode(trace))
+                as? [String: Any]
+        )
+        object["formatVersion"] = 2
+        object.removeValue(forKey: "scheduledMIDIEvents")
+        object.removeValue(forKey: "schedulerCancellations")
+        let decoded = try SessionEvaluationCodec.decode(
+            JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.formatVersion, 2)
+        XCTAssertTrue(decoded.scheduledMIDIEvents.isEmpty)
+        XCTAssertTrue(decoded.schedulerCancellations.isEmpty)
     }
 
     private func loadFixture() throws -> MIDISessionFixture {

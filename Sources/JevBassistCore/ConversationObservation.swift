@@ -171,9 +171,15 @@ public struct InteractionMatcher: Sendable {
             normalizer: 0.75,
             translationInvariant: false
         )
+        let humanDurationMicroseconds = UInt64(
+            max(0, human.durationBeats * max(1, beatMicroseconds)).rounded()
+        )
+        let humanStartedAt = human.finalizedAtMicroseconds >= humanDurationMicroseconds
+            ? human.finalizedAtMicroseconds - humanDurationMicroseconds
+            : 0
         let delay = responseEndedAtMicroseconds.map {
-            human.finalizedAtMicroseconds >= $0
-                ? Double(human.finalizedAtMicroseconds - $0) / max(1, beatMicroseconds)
+            humanStartedAt >= $0
+                ? Double(humanStartedAt - $0) / max(1, beatMicroseconds)
                 : 0
         } ?? 0
         let temporal = max(0, 1 - delay / 8)

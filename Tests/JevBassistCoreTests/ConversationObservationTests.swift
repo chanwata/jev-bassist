@@ -43,7 +43,7 @@ final class ConversationObservationTests: XCTestCase {
         let lineage = try XCTUnwrap(first.conversationLineage)
         let noteCount = first.phrase.messages.filter { $0.kind == .noteOn }.count
         for _ in 0..<noteCount {
-            engine.acknowledgeCommittedResponseNote(responseID: lineage.responseID)
+            engine.acknowledgeElapsedResponseNote(responseID: lineage.responseID)
         }
         let sounded = lineage.responseGesture.map(\.note)
         let reply = motif(id: 2, pitches: sounded.map { UInt8(min(127, Int($0) + 12)) })

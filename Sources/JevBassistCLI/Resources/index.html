@@ -603,13 +603,17 @@
     }
 
     function ingestVisualEvents(events) {
-      const now = Date.now();
+      const elapsed = state?.sessionElapsedMicroseconds ?? 0;
       for (const event of [...events].sort((a, b) => a.id - b.id)) {
         if (event.id <= highestVisualEventID) continue;
         highestVisualEventID = event.id;
-        if (event.atUnixMilliseconds >= now - 1500) pendingEvents.push(event);
+        if (event.sessionOffsetMicroseconds >= elapsed - 1_500_000) {
+          pendingEvents.push(event);
+        }
       }
-      pendingEvents.sort((a, b) => a.atUnixMilliseconds - b.atUnixMilliseconds);
+      pendingEvents.sort(
+        (a, b) => a.sessionOffsetMicroseconds - b.sessionOffsetMicroseconds
+      );
     }
 
     function applyState(next) {
@@ -621,13 +625,13 @@
         phraseFields.clear();
         humanTrace.splice(0);
         visualBursts.splice(0);
-        clockAnchorPerformance = next.startedAtUnixMilliseconds == null
+        clockAnchorPerformance = next.sessionElapsedMicroseconds == null
           ? null
-          : performance.now() - Math.max(0, Date.now() - next.startedAtUnixMilliseconds);
+          : performance.now() - next.sessionElapsedMicroseconds / 1000;
       }
-      if (clockAnchorPerformance == null && next.startedAtUnixMilliseconds != null) {
+      if (clockAnchorPerformance == null && next.sessionElapsedMicroseconds != null) {
         clockAnchorPerformance = performance.now()
-          - Math.max(0, Date.now() - next.startedAtUnixMilliseconds);
+          - next.sessionElapsedMicroseconds / 1000;
       }
       state = next;
       ingestVisualEvents(next.visualEvents ?? []);
@@ -668,10 +672,17 @@
 
     function triggerVisualEvent(event, now) {
       if (event.kind === 'cancel') {
-        if (event.responseID != null) phraseFields.delete(event.responseID);
+        const canceled = phraseFields.get(event.responseID);
+        if (canceled) {
+          canceled.cancelledAt = now;
+          canceled.lastAt = now;
+          canceled.energy *= .45;
+        }
         return;
       }
-      const eventNow = now - Math.max(0, Date.now() - event.atUnixMilliseconds);
+      const eventNow = clockAnchorPerformance == null
+        ? now
+        : clockAnchorPerformance + event.sessionOffsetMicroseconds / 1000;
       const key = event.noteID == null
         ? `${event.performer}:${event.note}`
         : `${event.performer}:${event.noteID}`;
@@ -733,7 +744,11 @@
     }
 
     function consumeVisualEvents(now) {
-      while (pendingEvents.length && pendingEvents[0].atUnixMilliseconds <= now + 8) {
+      while (pendingEvents.length && (
+        clockAnchorPerformance == null
+          || clockAnchorPerformance
+            + pendingEvents[0].sessionOffsetMicroseconds / 1000 <= now + 8
+      )) {
         triggerVisualEvent(pendingEvents.shift(), now);
       }
       for (const [key, note] of activeNotes) {
@@ -918,6 +933,7 @@
         );
       const span = Math.max(5, bounds.maximumNote - bounds.minimumNote);
       return points.map(point => ({
+        sourceNoteID: point.sourceNoteID,
         x: xStart + point.relativeOnsetBeats / maximumTime * (xEnd - xStart),
         y: viewportHeight * (.78 - (point.note - bounds.minimumNote) / span * .56),
         intensity: point.intensity ?? .6,
@@ -1043,13 +1059,18 @@
           strokeGesture(response, offset, fragment, fade * (.12 + centrality * .5));
         }
 
-        const links = Math.min(source.length, response.length);
         context.shadowBlur = 0;
         context.lineWidth = .6;
         context.strokeStyle = 'rgba(242,240,232,.18)';
-        for (let point = 0; point < links; point++) {
-          const start = source[Math.floor(point * source.length / links)];
-          const end = response[Math.floor(point * response.length / links)];
+        const sourceByID = new Map(
+          source.filter(point => point.sourceNoteID != null)
+            .map(point => [String(point.sourceNoteID), point])
+        );
+        for (const end of response) {
+          const start = end.sourceNoteID == null
+            ? null
+            : sourceByID.get(String(end.sourceNoteID));
+          if (!start) continue;
           context.beginPath();
           context.moveTo(start.x, start.y);
           context.bezierCurveTo(
@@ -1151,15 +1172,14 @@
     }
 
     function render() {
-      const now = Date.now();
       const frameNow = performance.now();
       const deltaSeconds = Math.max(0, (frameNow - previousFrame) / 1000);
       previousFrame = frameNow;
       sampleAudio();
-      consumeVisualEvents(now);
+      consumeVisualEvents(frameNow);
       const clock = updateClock(frameNow);
-      evolveMembrane(now, deltaSeconds);
-      drawMembrane(now, clock.beatProgress, clock.absoluteBeat, deltaSeconds);
+      evolveMembrane(frameNow, deltaSeconds);
+      drawMembrane(frameNow, clock.beatProgress, clock.absoluteBeat, deltaSeconds);
       requestAnimationFrame(render);
     }
 
@@ -1245,6 +1265,12 @@
       if (audioStream) toggleAudio(true);
     });
     window.addEventListener('resize', resizeCanvas);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        clockAnchorPerformance = null;
+        previousFrame = performance.now();
+      }
+    });
     window.addEventListener('beforeunload', () => {
       audioStream?.getTracks().forEach(track => track.stop());
     });

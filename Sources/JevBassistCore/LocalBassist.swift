@@ -1870,7 +1870,11 @@ public struct LocalBassistEngine: Sendable {
     }
 
     public mutating func acknowledgeCommittedConversationNote(responseID: UInt64) {
-        conversationEngine?.acknowledgeCommittedResponseNote(responseID: responseID)
+        acknowledgeElapsedConversationNote(responseID: responseID)
+    }
+
+    public mutating func acknowledgeElapsedConversationNote(responseID: UInt64) {
+        conversationEngine?.acknowledgeElapsedResponseNote(responseID: responseID)
     }
 
     public mutating func discardUncommittedConversationResponse(responseID: UInt64) {

@@ -105,17 +105,20 @@ public struct ConversationLineage: Codable, Equatable, Sendable {
 }
 
 public struct ConversationGesturePoint: Codable, Equatable, Sendable {
+    public let sourceNoteID: UInt64?
     public let note: UInt8
     public let relativeOnsetBeats: Double
     public let durationBeats: Double
     public let intensity: Double
 
     public init(
+        sourceNoteID: UInt64? = nil,
         note: UInt8,
         relativeOnsetBeats: Double,
         durationBeats: Double,
         intensity: Double
     ) {
+        self.sourceNoteID = sourceNoteID
         self.note = note
         self.relativeOnsetBeats = relativeOnsetBeats
         self.durationBeats = durationBeats
@@ -124,17 +127,20 @@ public struct ConversationGesturePoint: Codable, Equatable, Sendable {
 }
 
 public struct ConversationResponseNote: Codable, Equatable, Sendable {
+    public let sourceNoteID: UInt64?
     public let note: UInt8
     public let velocity: UInt8
     public let relativeOnsetBeats: Double
     public let durationBeats: Double
 
     public init(
+        sourceNoteID: UInt64? = nil,
         note: UInt8,
         velocity: UInt8,
         relativeOnsetBeats: Double,
         durationBeats: Double
     ) {
+        self.sourceNoteID = sourceNoteID
         self.note = note
         self.velocity = velocity
         self.relativeOnsetBeats = relativeOnsetBeats
@@ -433,6 +439,7 @@ public struct ResponseCandidateGenerator: Sendable {
         var tailNotes = echoNotes
         if let last = tailNotes.last {
             tailNotes[tailNotes.count - 1] = ConversationResponseNote(
+                sourceNoteID: last.sourceNoteID,
                 note: pitchContext.cadencePitch(
                     from: last.note,
                     previous: tailNotes.dropLast().last?.note
@@ -443,6 +450,7 @@ public struct ResponseCandidateGenerator: Sendable {
             )
         }
         let held = ConversationResponseNote(
+            sourceNoteID: source.last?.sourceNoteID,
             note: pitchContext.cadencePitch(
                 from: echoNotes.last?.note ?? echoNotes[0].note,
                 previous: echoNotes.dropLast().last?.note
@@ -675,6 +683,7 @@ public struct ResponseCandidateGenerator: Sendable {
             let velocity = Double(source[index].velocity) * 0.66
                 + source[index].accent * 7 + arc + opening + ending
             return ConversationResponseNote(
+                sourceNoteID: source[index].sourceNoteID,
                 note: pitches[index],
                 velocity: UInt8(max(32, min(88, velocity.rounded()))),
                 relativeOnsetBeats: relativeOnset,
@@ -1034,7 +1043,7 @@ private struct PendingConversation: Sendable {
 private struct PlannedConversationResponse: Sendable {
     let candidate: ConversationResponseCandidate
     let plannedEndMicroseconds: UInt64
-    var committedNoteCount: Int
+    var elapsedNoteCount: Int
     var generationApplied: Bool
 }
 
@@ -1101,7 +1110,7 @@ public struct ConversationEngine: Sendable {
         )
         for _ in selected.notes {
             if let responseID = plan.conversationLineage?.responseID {
-                acknowledgeCommittedResponseNote(responseID: responseID)
+                acknowledgeElapsedResponseNote(responseID: responseID)
             }
         }
         return plan
@@ -1218,27 +1227,28 @@ public struct ConversationEngine: Sendable {
         decisionProvider.cancelPendingDecisions()
     }
 
-    /// Advances conversational memory only when a Note On has crossed the
-    /// rolling scheduler's commitment horizon.
-    public mutating func acknowledgeCommittedResponseNote(responseID: UInt64) {
+    /// Advances conversational memory only after a scheduled Note On's onset
+    /// has elapsed. Merely handing an event to the MIDI output is not enough:
+    /// the player cannot answer material that has not sounded yet.
+    public mutating func acknowledgeElapsedResponseNote(responseID: UInt64) {
         guard var planned = plannedResponses[responseID] else { return }
-        let previousCount = planned.committedNoteCount
-        planned.committedNoteCount = min(
+        let previousCount = planned.elapsedNoteCount
+        planned.elapsedNoteCount = min(
             planned.candidate.notes.count,
-            planned.committedNoteCount + 1
+            planned.elapsedNoteCount + 1
         )
         previousResponseID = responseID
         previousResponseNotes = Array(
-            planned.candidate.notes.prefix(planned.committedNoteCount)
+            planned.candidate.notes.prefix(planned.elapsedNoteCount)
         )
-        if !planned.generationApplied, planned.committedNoteCount > 0 {
+        if !planned.generationApplied, planned.elapsedNoteCount > 0 {
             generation += 1
             planned.generationApplied = true
             turnState = .responding
         }
         if let originMotif {
             if planned.candidate.relationship == .originalReturn,
-               planned.committedNoteCount == planned.candidate.notes.count {
+               planned.elapsedNoteCount == planned.candidate.notes.count {
                 accumulatedDivergence = 0
             } else {
                 accumulatedDivergence = interactionMatcher.distance(
@@ -1248,7 +1258,7 @@ public struct ConversationEngine: Sendable {
             }
         }
         if previousCount < planned.candidate.notes.count,
-           planned.committedNoteCount == planned.candidate.notes.count {
+           planned.elapsedNoteCount == planned.candidate.notes.count {
             previousResponseEndedAtMicroseconds = planned.plannedEndMicroseconds
             turnState = planned.candidate.relationship == .originalReturn
                 ? .settling
@@ -1258,9 +1268,15 @@ public struct ConversationEngine: Sendable {
         trimPlannedResponses()
     }
 
+    /// Kept for source compatibility with trace consumers written before the
+    /// onset/commit distinction was represented explicitly.
+    public mutating func acknowledgeCommittedResponseNote(responseID: UInt64) {
+        acknowledgeElapsedResponseNote(responseID: responseID)
+    }
+
     public mutating func discardUncommittedResponse(responseID: UInt64) {
         guard let planned = plannedResponses[responseID] else { return }
-        if planned.committedNoteCount == 0 {
+        if planned.elapsedNoteCount == 0 {
             plannedResponses.removeValue(forKey: responseID)
         }
     }
@@ -1358,7 +1374,7 @@ public struct ConversationEngine: Sendable {
             plannedResponses[responseID] = PlannedConversationResponse(
                 candidate: selected,
                 plannedEndMicroseconds: phrase.endMicroseconds,
-                committedNoteCount: 0,
+                elapsedNoteCount: 0,
                 generationApplied: false
             )
         }
@@ -1517,6 +1533,7 @@ public struct ConversationEngine: Sendable {
         guard let first = notes.first else { return [] }
         return notes.map {
             ConversationGesturePoint(
+                sourceNoteID: $0.sourceNoteID,
                 note: $0.note,
                 relativeOnsetBeats: $0.relativeOnsetBeats - first.relativeOnsetBeats,
                 durationBeats: $0.durationBeats,
@@ -1530,6 +1547,7 @@ public struct ConversationEngine: Sendable {
     ) -> [ConversationGesturePoint] {
         notes.map {
             ConversationGesturePoint(
+                sourceNoteID: $0.sourceNoteID,
                 note: $0.note,
                 relativeOnsetBeats: $0.relativeOnsetBeats,
                 durationBeats: $0.durationBeats,

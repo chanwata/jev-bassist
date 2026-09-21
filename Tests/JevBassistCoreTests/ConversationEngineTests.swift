@@ -164,7 +164,7 @@ final class ConversationEngineTests: XCTestCase {
         XCTAssertTrue(provider.expiredRevisions.isEmpty)
     }
 
-    func testConversationMemoryAdvancesOnlyAfterCommittedNoteOn() throws {
+    func testConversationMemoryAdvancesOnlyAfterElapsedNoteOn() throws {
         var engine = ConversationEngine(
             musicalStateConfiguration: try MusicalStateConfiguration(
                 tempoBPM: 120,
@@ -185,12 +185,59 @@ final class ConversationEngineTests: XCTestCase {
         ))
         XCTAssertNil(beforeCommit.conversationLineage?.parentResponseID)
 
-        engine.acknowledgeCommittedResponseNote(responseID: firstResponseID)
+        engine.acknowledgeElapsedResponseNote(responseID: firstResponseID)
         let afterCommit = try XCTUnwrap(engine.submit(
             motif(id: 3, finalizedAt: 6_215_000),
             availableAtMicroseconds: 6_215_000
         ))
         XCTAssertEqual(afterCommit.conversationLineage?.parentResponseID, firstResponseID)
+    }
+
+    func testSilenceProducesOneAutonomousProposalThenWaits() throws {
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3
+        )
+
+        let answer = try XCTUnwrap(engine.submit(
+            motif(id: 1),
+            availableAtMicroseconds: 2_215_000
+        ))
+        let answerID = try XCTUnwrap(answer.conversationLineage?.responseID)
+        let answerAttacks = answer.phrase.messages.filter { $0.kind == .noteOn }
+        for _ in answerAttacks {
+            engine.acknowledgeElapsedResponseNote(responseID: answerID)
+        }
+        let answerEnd = try XCTUnwrap(
+            answer.phrase.messages.map(\.offsetMicroseconds).max()
+        )
+
+        let proposal = try XCTUnwrap(
+            engine.advance(through: answerEnd + 1_000_000)
+        )
+        XCTAssertEqual(proposal.conversationLineage?.intent, .question)
+        XCTAssertTrue(
+            proposal.conversationLineage.map {
+                [
+                    ConversationRelationship.fragmentation,
+                    .tailVariation,
+                    .hold
+                ].contains($0.relationship)
+            } == true
+        )
+
+        let proposalID = try XCTUnwrap(proposal.conversationLineage?.responseID)
+        for _ in proposal.phrase.messages.filter({ $0.kind == .noteOn }) {
+            engine.acknowledgeElapsedResponseNote(responseID: proposalID)
+        }
+        let proposalEnd = try XCTUnwrap(
+            proposal.phrase.messages.map(\.offsetMicroseconds).max()
+        )
+        XCTAssertNil(engine.advance(through: proposalEnd + 4_000_000))
     }
 
     private func motif(

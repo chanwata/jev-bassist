@@ -198,6 +198,7 @@ public struct LocalBassistSessionEvaluator: Sendable {
         var performanceDiagnostics: [PerformanceTrackerDiagnostic] = []
         var scheduler = try RollingMIDIScheduler()
         var schedulerLineage: [UInt64: ConversationLineage] = [:]
+        var pendingAcknowledgements: [(offset: UInt64, responseID: UInt64)] = []
         var scheduledMIDIEvents: [RollingMIDIEvent] = []
         var schedulerCancellations: [RollingMIDICancellation] = []
 
@@ -232,14 +233,33 @@ public struct LocalBassistSessionEvaluator: Sendable {
             }
         }
 
+        func acknowledgeElapsed(through offset: UInt64) {
+            pendingAcknowledgements.sort { $0.offset < $1.offset }
+            let elapsedCount = pendingAcknowledgements.prefix {
+                $0.offset <= offset
+            }.count
+            guard elapsedCount > 0 else { return }
+            let elapsed = pendingAcknowledgements.prefix(elapsedCount)
+            pendingAcknowledgements.removeFirst(elapsedCount)
+            for acknowledgement in elapsed {
+                engine.acknowledgeElapsedConversationNote(
+                    responseID: acknowledgement.responseID
+                )
+            }
+        }
+
         func commit(through offset: UInt64) throws {
+            acknowledgeElapsed(through: offset)
             let due = try scheduler.drain(through: offset)
             scheduledMIDIEvents.append(contentsOf: due)
             for event in due where event.message.kind == .noteOn {
                 if let responseID = schedulerLineage[event.revision]?.responseID {
-                    engine.acknowledgeCommittedConversationNote(responseID: responseID)
+                    pendingAcknowledgements.append(
+                        (event.message.offsetMicroseconds, responseID)
+                    )
                 }
             }
+            acknowledgeElapsed(through: offset)
         }
 
         for event in fixture.events {

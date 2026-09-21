@@ -669,6 +669,11 @@ private func runSoundcheck(_ options: SoundcheckOptions) throws {
 /// Mutable session state is confined to `queue`; the unchecked conformance is
 /// used only so CoreMIDI's Sendable callback can enqueue copied events.
 private final class JamSession: @unchecked Sendable, JamWebControlling {
+    private struct PendingConversationAcknowledgement {
+        let onsetMicroseconds: UInt64
+        let responseID: UInt64
+    }
+
     private static let inputGraceMicroseconds: UInt64 = 8_000
     private static let outputSafetyOffsetMicroseconds: UInt64 = 12_000
     private static let schedulingHorizonMicroseconds: UInt64 = 50_000
@@ -682,6 +687,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var engine: LocalBassistEngine
     private var scheduler: RollingMIDIScheduler
     private var schedulerLineage: [UInt64: ConversationLineage] = [:]
+    private var pendingConversationAcknowledgements: [PendingConversationAcknowledgement] = []
     private var anchorHostTime: UInt64?
     private var startedAt: Date?
     private var timer: DispatchSourceTimer?
@@ -863,16 +869,16 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             velocity: event.velocity
         )
         do {
+            acknowledgeElapsedConversationNotes(through: offset)
             let update = try engine.ingest(sessionEvent)
-            let yieldingToHuman = event.kind == .noteOn && event.velocity > 0
-            if yieldingToHuman {
+            let isHumanAttack = event.kind == .noteOn && event.velocity > 0
+            if isHumanAttack {
                 engine.yieldToHuman()
             }
             try process(
                 update,
                 anchorHostTime: anchorHostTime,
-                currentOffsetMicroseconds: offset,
-                yieldingToHuman: false
+                currentOffsetMicroseconds: offset
             )
             if options.webUI {
                 appendVisualEvent(
@@ -931,6 +937,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             ? elapsed - Self.inputGraceMicroseconds
             : 0
         do {
+            acknowledgeElapsedConversationNotes(through: safeElapsed)
             try process(
                 engine.advance(through: safeElapsed),
                 anchorHostTime: anchorHostTime,
@@ -951,8 +958,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private func process(
         _ update: LocalBassistUpdate,
         anchorHostTime: UInt64,
-        currentOffsetMicroseconds: UInt64,
-        yieldingToHuman: Bool = false
+        currentOffsetMicroseconds: UInt64
     ) throws {
         for snapshot in update.snapshots where snapshot.boundary == .bar {
             print(format(snapshot))
@@ -997,23 +1003,6 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 }
             }
         }
-        if yieldingToHuman {
-            let cancellation = scheduler.yieldToHuman(at: currentOffsetMicroseconds)
-            for revision in cancellation.canceledRevisions {
-                if let lineage = schedulerLineage[revision] {
-                    engine.discardUncommittedConversationResponse(
-                        responseID: lineage.responseID
-                    )
-                }
-                schedulerLineage.removeValue(forKey: revision)
-            }
-            if !cancellation.canceledEventIDs.isEmpty {
-                print(
-                    "Human re-entry canceled \(cancellation.canceledEventIDs.count) "
-                        + "unsent companion MIDI events."
-                )
-            }
-        }
         try sendDueEvents(
             currentOffsetMicroseconds: currentOffsetMicroseconds,
             anchorHostTime: anchorHostTime
@@ -1035,10 +1024,22 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             anchorHostTime: outputAnchor
         )
         for event in due where event.message.kind == .noteOn {
-            if let responseID = schedulerLineage[event.revision]?.responseID {
-                engine.acknowledgeCommittedConversationNote(responseID: responseID)
+            guard let responseID = schedulerLineage[event.revision]?.responseID else {
+                continue
             }
+            let onset = event.message.offsetMicroseconds
+                .addingReportingOverflow(Self.outputSafetyOffsetMicroseconds)
+            pendingConversationAcknowledgements.append(
+                PendingConversationAcknowledgement(
+                    onsetMicroseconds: onset.overflow ? UInt64.max : onset.partialValue,
+                    responseID: responseID
+                )
+            )
         }
+        pendingConversationAcknowledgements.sort {
+            $0.onsetMicroseconds < $1.onsetMicroseconds
+        }
+        acknowledgeElapsedConversationNotes(through: currentOffsetMicroseconds)
         if options.webUI {
             for event in due {
                 let message = event.message
@@ -1054,6 +1055,20 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 )
             }
             publishState(elapsedMicroseconds: currentOffsetMicroseconds)
+        }
+    }
+
+    private func acknowledgeElapsedConversationNotes(through offset: UInt64) {
+        let elapsedCount = pendingConversationAcknowledgements.prefix {
+            $0.onsetMicroseconds <= offset
+        }.count
+        guard elapsedCount > 0 else { return }
+        let elapsed = pendingConversationAcknowledgements.prefix(elapsedCount)
+        pendingConversationAcknowledgements.removeFirst(elapsedCount)
+        for acknowledgement in elapsed {
+            engine.acknowledgeElapsedConversationNote(
+                responseID: acknowledgement.responseID
+            )
         }
     }
 
@@ -1083,6 +1098,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 source: options.source,
                 destination: options.destination,
                 startedAtUnixMilliseconds: startedAt.map { $0.timeIntervalSince1970 * 1_000 },
+                sessionElapsedMicroseconds: elapsedMicroseconds
+                    ?? currentElapsedMicroseconds(),
                 bar: barIndex.map { $0 + 1 },
                 beat: absoluteBeat.map { $0 % options.beatsPerBar + 1 },
                 phase: phase,
@@ -1153,6 +1170,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 kind: kind,
                 note: note,
                 velocity: velocity,
+                sessionOffsetMicroseconds: sessionOffsetMicroseconds,
                 atUnixMilliseconds: startedAt.timeIntervalSince1970 * 1_000
                     + Double(sessionOffsetMicroseconds) / 1_000,
                 originMotifID: lineage?.originMotifID,
