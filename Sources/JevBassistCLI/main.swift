@@ -180,7 +180,9 @@ private enum Command {
         }
         let styleName = options["--style"] ?? AccompanimentStyle.bass.rawValue
         guard let style = AccompanimentStyle(rawValue: styleName) else {
-            throw CLIError.invalidArguments("--style must be 'bass', 'ambient', or 'memory'.")
+            throw CLIError.invalidArguments(
+                "--style must be 'bass', 'ambient', 'memory', or 'fugue'."
+            )
         }
         let progression: [ChordCandidate]
         if let progressionText = options["--progression"] {
@@ -322,7 +324,7 @@ USAGE
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory] [--progression CHORDS] [--ui]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--progression CHORDS] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -400,7 +402,7 @@ private func format(_ plan: BassBarPlan, style: AccompanimentStyle) -> String {
         .filter { $0.kind == .noteOn }
         .map { MIDINoteName.name(for: $0.note) }
         .joined(separator: ",")
-    let expression = style == .memory
+    let expression = style == .memory || style == .fugue
         ? " memory=\(String(format: "%.2f", plan.expression.memory)) tension=\(String(format: "%.2f", plan.expression.tension)) resonance=\(String(format: "%.2f", plan.expression.resonance))"
         : ""
     return "\(style.rawValue) bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)\(expression)"

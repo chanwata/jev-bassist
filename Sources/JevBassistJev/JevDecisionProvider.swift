@@ -256,6 +256,42 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
         )
     )
 
+    public static let fugue = JevBassQuestions(
+        activity: JevChoiceQuestion(
+            instructions: "Choose the length and number of voices for a concise Baroque-style imitation of the human's recent subject. Preserve space when the source phrase is dense.",
+            criteria: [
+                "rest": "Withhold the answer because the subject is unclear or silence has more structural value.",
+                "sparse": "State a short two-note answer without a countersubject.",
+                "normal": "State up to four subject notes with a quiet lower countersubject.",
+                "busy": "Use up to six subject notes and a lower countersubject only when the player leaves a broad opening."
+            ]
+        ),
+        relationship: JevChoiceQuestion(
+            instructions: "Choose the temporal treatment of the imitative entry.",
+            criteria: [
+                "follow": "Enter after half a beat using the subject's recognizable rhythmic proportions.",
+                "contrast": "Enter after one beat in rhythmic diminution for a more independent answer.",
+                "hold": "Enter on the boundary in augmentation with longer, connected values."
+            ]
+        ),
+        motion: JevChoiceQuestion(
+            instructions: "Choose one local contrapuntal transformation. The engine supplies the dominant answer and keeps both voices in safe registers.",
+            criteria: [
+                "root": "Give a real answer on the dominant while preserving the subject intervals.",
+                "step": "Compress wide subject intervals into smoother stepwise motion.",
+                "approach": "Invert the subject contour around its dominant answer.",
+                "leap": "Expand alternating intervals for a more dramatic answer."
+            ]
+        ),
+        fill: JevNoulQuestion(
+            instructions: "Should the final subject note cadence toward the supplied following harmony?",
+            criteria: JevNoulCriteria(
+                trueDescription: "Close the answer on the next chord root because the phrase is turning forward.",
+                falseDescription: "Keep the transformed subject intact because continuation matters more than cadence."
+            )
+        )
+    )
+
     public static func forStyle(_ style: AccompanimentStyle) -> JevBassQuestions {
         switch style {
         case .bass:
@@ -264,6 +300,8 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             return .ambient
         case .memory:
             return .memory
+        case .fugue:
+            return .fugue
         }
     }
 

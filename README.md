@@ -9,7 +9,7 @@ The project deliberately separates two jobs:
 
 Network latency must never sit in the note-timing path.
 
-## Current milestone: memory ensemble
+## Current milestone: imitative ensemble
 
 The CLI completes its audible loop with either local rules or a pipelined Jev decision provider. It can:
 
@@ -28,8 +28,9 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
 - render the same bounded decisions as one quiet, sustained ambient voicing per bar;
 - remember a human motif and return a delayed, locally transformed trace that fades over two silent bars;
+- answer a short human subject on the dominant with optional contrary-motion counterpoint;
 - mix the human and companion parts independently with MIDI Channel Volume controls;
-- render both MIDI performances as one persistent, beat-synchronized membrane;
+- render both MIDI performances as one strongly reactive, beat-synchronized membrane;
 - flush pending output and silence the selected channel when a live session stops.
 
 The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion reads the authoritative Swift clock and can start or stop the same live session without entering the MIDI output path.
@@ -171,6 +172,28 @@ swift run jev-bassist jam \
 
 Activity selects one, three, or four representative notes rather than adding a generic accompaniment pattern. `root` transposes the remembered contour to the chord root, `step` compresses wide intervals, `approach` reverses the motif, and `leap` expands alternating intervals. A silent bar reuses the memory more quietly; after two silent bars it disappears. Responses remain in MIDI 48–72 and use low velocity so a slow pad, glass, or soft pluck patch can retain the human phrase's identity without covering it.
 
+## Use the fugue ensemble style
+
+`--style fugue` treats the most recent three-to-six-note idea as a compact subject. The companion answers on the dominant and, when there is enough space, adds a quieter lower voice in contrary motion. It is Baroque-inspired call and response rather than a literal reconstruction of a Bach score: the goal is recognizable imitation, independent motion, and a clear cadence while preserving live-session timing.
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 96 \
+  --input-channel 1 \
+  --output-channel 2 \
+  --human-volume 100 \
+  --companion-volume 74 \
+  --intro-bars 2 \
+  --progression "Dm7,G7,Cmaj7,A7" \
+  --style fugue \
+  --brain jev \
+  --ui
+```
+
+Play a concise subject, then leave roughly a beat of room for the answer. `activity` chooses how much of the subject is stated and whether a countersubject is added. `relationship` chooses the entry and rhythmic treatment: recognizable timing, diminution, or augmentation. `motion` preserves, compresses, inverts, or expands the contour; `fill` may cadence the final note toward the next chord. A short pluck, organ, harpsichord-like patch, or restrained strings will keep the two lines clearer than a long pad.
+
 `--human-volume` and `--companion-volume` accept MIDI values from 0 to 127 and default to 100 and 72. They send Channel Volume (CC7) to the input and output part channels, so the parts must use different MIDI channels for independent control. If both channel options are the same, the two GUI controls are linked because one MIDI part cannot have two CC7 values.
 
 ## Open the shared beat display
@@ -192,7 +215,7 @@ swift run jev-bassist jam \
 
 The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Click **Start** on the downbeat. That single action starts the Swift/CoreMIDI bar clock and the browser display together; the browser does not open MIDI itself and does not run a second independent clock. **Stop** ends the live process safely. You can also press `Return` in Terminal.
 
-The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. The visual field is a single simulated membrane driven by the combined MIDI timeline. Human notes disturb it from the left and companion notes return from the right; pitch selects the affected band, while velocity and channel volume control force. In memory mode the engine also publishes four slow expression values: remembered strength controls coupling, tension changes stiffness, activity changes line weight, and resonance controls damping and afterimage length. No microphone permission or audio stream is required.
+The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. The visual field is a single simulated membrane driven by the combined MIDI timeline. Human notes disturb it strongly from the left and companion notes return from the right; pitch selects the affected band, while velocity and channel volume control force. Displacement, glow, and afterimages are deliberately exaggerated so attacks remain legible at performance distance. Fugue answers also create a mirrored secondary disturbance, making imitation visible across the field. In memory and fugue modes the engine publishes four slow expression values: remembered strength controls coupling, tension changes stiffness, activity changes line weight, and resonance controls damping and afterimage length. No microphone permission or audio stream is required.
 
 For the membrane to follow the actual mixed sound and reverb as well, connect the JD-Xi audio outputs to the UR22mkII inputs, select the UR22mkII as the browser or macOS input, and click **Audio**. Chrome will request input permission once. The page analyzes only RMS energy and spectral brightness inside the browser; it does not play, upload, or send the audio to Swift. Leave Audio off when only MIDI response is desired.
 

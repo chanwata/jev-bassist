@@ -509,7 +509,7 @@
     const pendingEvents = [];
     const activeNotes = new Map();
     const volumeTimers = {};
-    const membrane = {positions: [], velocities: [], bands: 11, nodes: 96};
+    const membrane = {positions: [], velocities: [], bands: 15, nodes: 120};
     let state = null;
     let renderedBeat = -1;
     let renderedBeatsPerBar = 0;
@@ -669,21 +669,31 @@
     function disturbMembrane(event) {
       const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
       const band = Math.round((1 - pitch) * (membrane.bands - 1));
-      const x = event.performer === 'human' ? .27 : .73;
+      const x = event.performer === 'human' ? .18 : .82;
       const node = Math.round(x * (membrane.nodes - 1));
       const gain = performerGain(event.performer);
       const onset = event.kind === 'noteOn' && event.velocity > 0;
       const energy = Math.max(.08, event.velocity / 127) * gain * (onset ? 1 : -.22);
       const direction = event.performer === 'human' ? 1 : -1;
 
-      for (let bandOffset = -2; bandOffset <= 2; bandOffset++) {
+      for (let bandOffset = -3; bandOffset <= 3; bandOffset++) {
         const targetBand = band + bandOffset;
         if (targetBand < 0 || targetBand >= membrane.bands) continue;
-        for (let nodeOffset = -7; nodeOffset <= 7; nodeOffset++) {
+        for (let nodeOffset = -12; nodeOffset <= 12; nodeOffset++) {
           const targetNode = node + nodeOffset;
           if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
-          const falloff = Math.exp(-Math.abs(nodeOffset) * .25 - Math.abs(bandOffset) * .7);
-          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * .24;
+          const falloff = Math.exp(-Math.abs(nodeOffset) * .16 - Math.abs(bandOffset) * .5);
+          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * .62;
+        }
+      }
+      if (state?.style === 'fugue' && event.performer === 'companion' && onset) {
+        const mirrorBand = membrane.bands - 1 - band;
+        const mirrorNode = Math.round((1 - x) * (membrane.nodes - 1));
+        for (let nodeOffset = -9; nodeOffset <= 9; nodeOffset++) {
+          const targetNode = mirrorNode + nodeOffset;
+          if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
+          const falloff = Math.exp(-Math.abs(nodeOffset) * .18);
+          membrane.velocities[mirrorBand][targetNode] -= energy * falloff * .38;
         }
       }
     }
@@ -692,22 +702,22 @@
       const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
       const memory = expression('expressionMemory', 0);
       const resonance = Math.max(expression('expressionResonance', .2), audioEnergy * .9);
-      const stiffness = .11 + tension * .09;
-      const damping = Math.min(.986, .92 + resonance * .055);
+      const stiffness = .16 + tension * .14;
+      const damping = Math.min(.992, .935 + resonance * .05);
       const step = Math.min(2, deltaSeconds * 60);
 
       for (const note of activeNotes.values()) {
         const pitch = Math.max(0, Math.min(1, (note.note - 36) / 48));
         const band = Math.round((1 - pitch) * (membrane.bands - 1));
-        const node = Math.round((note.performer === 'human' ? .27 : .73) * (membrane.nodes - 1));
+        const node = Math.round((note.performer === 'human' ? .18 : .82) * (membrane.nodes - 1));
         const direction = note.performer === 'human' ? 1 : -1;
         const energy = note.velocity / 127 * performerGain(note.performer);
-        membrane.velocities[band][node] += Math.sin(now * .002 + note.note) * energy * .003 * direction;
+        membrane.velocities[band][node] += Math.sin(now * .002 + note.note) * energy * .009 * direction;
       }
       if (audioEnergy > .015) {
         const centerBand = Math.round((1 - audioBrightness) * (membrane.bands - 1));
         const centerNode = Math.round(membrane.nodes * .5);
-        membrane.velocities[centerBand][centerNode] += Math.sin(now * .004) * audioEnergy * .012;
+        membrane.velocities[centerBand][centerNode] += Math.sin(now * .004) * audioEnergy * .03;
       }
 
       const nextVelocities = membrane.velocities.map(row => new Float32Array(row));
@@ -731,7 +741,11 @@
       membrane.velocities = nextVelocities;
       for (let band = 0; band < membrane.bands; band++) {
         for (let node = 1; node < membrane.nodes - 1; node++) {
-          membrane.positions[band][node] += membrane.velocities[band][node] * step;
+          membrane.velocities[band][node] = Math.max(-.8, Math.min(.8, membrane.velocities[band][node]));
+          membrane.positions[band][node] = Math.max(
+            -2.4,
+            Math.min(2.4, membrane.positions[band][node] + membrane.velocities[band][node] * step)
+          );
         }
       }
     }
@@ -741,34 +755,37 @@
       const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
       const activity = Math.max(expression('expressionActivity', 0), audioEnergy);
       const resonance = Math.max(expression('expressionResonance', .2), audioEnergy * .9);
-      const fade = .17 - resonance * .09;
+      const fade = .13 - resonance * .075;
       context.fillStyle = `rgba(8,9,8,${Math.max(.055, fade)})`;
       context.fillRect(0, 0, viewportWidth, viewportHeight);
 
       const gradient = context.createLinearGradient(0, 0, viewportWidth, 0);
-      gradient.addColorStop(0, `rgba(242,240,232,${.12 + activity * .15})`);
-      gradient.addColorStop(.48, `rgba(242,240,232,${.26 + memory * .24})`);
-      gradient.addColorStop(1, `rgba(200,255,69,${.16 + memory * .34})`);
+      gradient.addColorStop(0, `rgba(242,240,232,${.22 + activity * .28})`);
+      gradient.addColorStop(.48, `rgba(242,240,232,${.36 + memory * .34})`);
+      gradient.addColorStop(1, `rgba(200,255,69,${.28 + memory * .48})`);
       context.strokeStyle = gradient;
-      context.lineWidth = .7 + activity * 1.15;
+      context.lineWidth = 1.1 + activity * 2.1;
+      context.shadowColor = `rgba(200,255,69,${.16 + activity * .2})`;
+      context.shadowBlur = 8 + activity * 18;
 
       for (let band = 0; band < membrane.bands; band++) {
         const normalizedBand = band / (membrane.bands - 1);
         const baseline = viewportHeight * (.18 + normalizedBand * .64);
         const visibility = 1 - Math.abs(normalizedBand - .5) * .55;
-        context.globalAlpha = visibility * (.45 + memory * .55);
+        context.globalAlpha = visibility * (.58 + memory * .42);
         context.beginPath();
         for (let node = 0; node < membrane.nodes; node++) {
           const x = node / (membrane.nodes - 1) * viewportWidth;
           const field = membrane.positions[band][node];
-          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 3;
-          const y = baseline + field * viewportHeight * (.055 + tension * .035) + drift;
+          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 8;
+          const y = baseline + field * viewportHeight * (.10 + tension * .08) + drift;
           if (node === 0) context.moveTo(x, y);
           else context.lineTo(x, y);
         }
         context.stroke();
       }
       context.globalAlpha = 1;
+      context.shadowBlur = 0;
 
       const scanX = beatProgress * viewportWidth;
       const downbeat = state && absoluteBeat % state.beatsPerBar === 0;
