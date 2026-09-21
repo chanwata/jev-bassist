@@ -377,13 +377,119 @@ public struct ResponseArbiter: Sendable {
     }
 }
 
-public struct ConversationDevelopmentContext: Equatable, Sendable {
+public struct ConversationDevelopmentContext: Codable, Equatable, Sendable {
     public let generation: Int
     public let accumulatedDivergence: Double
     public let originSimilarity: Double
     public let notesPerBeat: Double
     public let registerShift: Int
     public let originDurationBeats: Double
+
+    public init(
+        generation: Int,
+        accumulatedDivergence: Double,
+        originSimilarity: Double,
+        notesPerBeat: Double,
+        registerShift: Int,
+        originDurationBeats: Double
+    ) {
+        self.generation = generation
+        self.accumulatedDivergence = accumulatedDivergence
+        self.originSimilarity = originSimilarity
+        self.notesPerBeat = notesPerBeat
+        self.registerShift = registerShift
+        self.originDurationBeats = originDurationBeats
+    }
+}
+
+public struct ConversationCandidateSummary: Codable, Equatable, Sendable {
+    public let id: String
+    public let relationship: ConversationRelationship
+    public let noteCount: Int
+    public let recognition: Double
+    public let space: Double
+    public let voiceLeading: Double
+
+    public init(candidate: ConversationResponseCandidate) {
+        id = candidate.id
+        relationship = candidate.relationship
+        noteCount = candidate.notes.count
+        recognition = candidate.score.recognition
+        space = candidate.score.space
+        voiceLeading = candidate.score.voiceLeading
+    }
+}
+
+public struct ConversationSelectionInput: Codable, Equatable, Sendable {
+    public let revision: UInt64
+    public let mode: MusicalMode
+    public let originMotifID: UInt64
+    public let sourceMotifID: UInt64
+    public let context: ConversationDevelopmentContext
+    public let candidates: [ConversationCandidateSummary]
+    public let localCandidateID: String
+
+    public init(
+        revision: UInt64,
+        mode: MusicalMode,
+        originMotifID: UInt64,
+        sourceMotifID: UInt64,
+        context: ConversationDevelopmentContext,
+        candidates: [ConversationCandidateSummary],
+        localCandidateID: String
+    ) {
+        self.revision = revision
+        self.mode = mode
+        self.originMotifID = originMotifID
+        self.sourceMotifID = sourceMotifID
+        self.context = context
+        self.candidates = candidates
+        self.localCandidateID = localCandidateID
+    }
+}
+
+public struct ConversationSelectionResolution: Equatable, Sendable {
+    public let candidateID: String
+    public let source: BassDecisionSource
+
+    public init(candidateID: String, source: BassDecisionSource) {
+        self.candidateID = candidateID
+        self.source = source
+    }
+}
+
+public protocol ConversationDecisionProvider: Sendable {
+    func prepare(_ input: ConversationSelectionInput)
+    func resolution(for input: ConversationSelectionInput) -> ConversationSelectionResolution?
+    func expire(revision: UInt64)
+    func cancelPendingDecisions()
+}
+
+public struct LocalConversationDecisionProvider: ConversationDecisionProvider {
+    public init() {}
+
+    public func prepare(_ input: ConversationSelectionInput) {}
+
+    public func resolution(
+        for input: ConversationSelectionInput
+    ) -> ConversationSelectionResolution? {
+        ConversationSelectionResolution(
+            candidateID: input.localCandidateID,
+            source: .rules
+        )
+    }
+
+    public func expire(revision: UInt64) {}
+    public func cancelPendingDecisions() {}
+}
+
+private struct PendingConversation: Sendable {
+    let motif: Motif
+    let tonalCenterPitchClass: UInt8
+    let candidates: [ConversationResponseCandidate]
+    let selectionInput: ConversationSelectionInput
+    let responseStartMicroseconds: UInt64
+    let selectionDeadlineMicroseconds: UInt64
 }
 
 public struct ConversationEngine: Sendable {
@@ -393,50 +499,178 @@ public struct ConversationEngine: Sendable {
 
     private let generator = ResponseCandidateGenerator()
     private let arbiter = ResponseArbiter()
+    private let decisionProvider: any ConversationDecisionProvider
     private var originMotif: Motif?
     private var generation = 0
     private var accumulatedDivergence = 0.0
     private var nextResponseID: UInt64 = 1
     private var previousResponseID: UInt64?
+    private var nextRevision: UInt64 = 1
+    private var pendingConversation: PendingConversation?
 
     public init(
         musicalStateConfiguration: MusicalStateConfiguration,
         mode: MusicalMode,
-        outputChannel: UInt8
+        outputChannel: UInt8,
+        decisionProvider: any ConversationDecisionProvider = LocalConversationDecisionProvider()
     ) {
         self.musicalStateConfiguration = musicalStateConfiguration
         self.mode = mode
         self.outputChannel = outputChannel
+        self.decisionProvider = decisionProvider
     }
 
     public mutating func plan(
         for motif: Motif,
         availableAtMicroseconds: UInt64? = nil
     ) -> BassBarPlan? {
-        if originMotif == nil {
-            originMotif = motif
+        let availableAt = max(
+            motif.finalizedAtMicroseconds,
+            availableAtMicroseconds ?? motif.finalizedAtMicroseconds
+        )
+        guard let prepared = prepareConversation(for: motif) else { return nil }
+        let selected = prepared.localSelection
+        let start = nextBeat(after: availableAt, beat: beatMicroseconds)
+        return finalize(
+            motif: motif,
+            selected: selected,
+            tonalCenterPitchClass: prepared.tonalCenterPitchClass,
+            startMicroseconds: start,
+            decisionSource: .rules
+        )
+    }
+
+    public mutating func submit(
+        _ motif: Motif,
+        availableAtMicroseconds: UInt64
+    ) -> BassBarPlan? {
+        if let pendingConversation {
+            decisionProvider.expire(revision: pendingConversation.selectionInput.revision)
+            self.pendingConversation = nil
         }
+        guard let prepared = prepareConversation(for: motif) else { return nil }
+        let revision = nextRevision
+        nextRevision += 1
+        let input = ConversationSelectionInput(
+            revision: revision,
+            mode: mode,
+            originMotifID: prepared.originMotifID,
+            sourceMotifID: motif.id,
+            context: prepared.developmentContext,
+            candidates: prepared.candidates.map(ConversationCandidateSummary.init),
+            localCandidateID: prepared.localSelection.id
+        )
+        decisionProvider.prepare(input)
+        if let resolution = decisionProvider.resolution(for: input),
+           let selected = prepared.candidates.first(where: {
+               $0.id == resolution.candidateID
+           }) {
+            let start = nextBeat(after: availableAtMicroseconds, beat: beatMicroseconds)
+            return finalize(
+                motif: motif,
+                selected: selected,
+                tonalCenterPitchClass: prepared.tonalCenterPitchClass,
+                startMicroseconds: start,
+                decisionSource: resolution.source
+            )
+        }
+
+        let earliestDecision = availableAtMicroseconds + 350_000
+        let responseStart = nextBeat(after: earliestDecision, beat: beatMicroseconds)
+        pendingConversation = PendingConversation(
+            motif: motif,
+            tonalCenterPitchClass: prepared.tonalCenterPitchClass,
+            candidates: prepared.candidates,
+            selectionInput: input,
+            responseStartMicroseconds: responseStart,
+            selectionDeadlineMicroseconds: responseStart > 100_000
+                ? responseStart - 100_000
+                : 0
+        )
+        return nil
+    }
+
+    public mutating func advance(through offsetMicroseconds: UInt64) -> BassBarPlan? {
+        guard let pending = pendingConversation else { return nil }
+        let resolution = decisionProvider.resolution(for: pending.selectionInput)
+        if resolution == nil, offsetMicroseconds < pending.selectionDeadlineMicroseconds {
+            return nil
+        }
+        pendingConversation = nil
+        let selected: ConversationResponseCandidate
+        let source: BassDecisionSource
+        if let resolution,
+           let resolved = pending.candidates.first(where: {
+               $0.id == resolution.candidateID
+           }) {
+            selected = resolved
+            source = resolution.source
+        } else {
+            decisionProvider.expire(revision: pending.selectionInput.revision)
+            selected = pending.candidates.first {
+                $0.id == pending.selectionInput.localCandidateID
+            } ?? pending.candidates[0]
+            source = .fallback
+        }
+        let start = offsetMicroseconds < pending.responseStartMicroseconds
+            ? pending.responseStartMicroseconds
+            : nextBeat(after: offsetMicroseconds, beat: beatMicroseconds)
+        return finalize(
+            motif: pending.motif,
+            selected: selected,
+            tonalCenterPitchClass: pending.tonalCenterPitchClass,
+            startMicroseconds: start,
+            decisionSource: source
+        )
+    }
+
+    public mutating func yieldToHuman() {
+        guard let pendingConversation else { return }
+        decisionProvider.expire(revision: pendingConversation.selectionInput.revision)
+        self.pendingConversation = nil
+    }
+
+    public func cancelPendingDecisions() {
+        decisionProvider.cancelPendingDecisions()
+    }
+
+    private var beatMicroseconds: Double {
+        60_000_000 / musicalStateConfiguration.tempoBPM
+    }
+
+    private mutating func prepareConversation(for motif: Motif) -> (
+        originMotifID: UInt64,
+        tonalCenterPitchClass: UInt8,
+        developmentContext: ConversationDevelopmentContext,
+        candidates: [ConversationResponseCandidate],
+        localSelection: ConversationResponseCandidate
+    )? {
+        if originMotif == nil { originMotif = motif }
         guard let originMotif else { return nil }
         let legacy = originMotif.legacyMemory()
         guard let center = ModalHarmonyPlanner(mode: mode).inferTonalCenter(from: legacy.notes) else {
             return nil
         }
-        let context = ModalPitchContext(mode: mode, tonalCenterPitchClass: center)
+        let pitchContext = ModalPitchContext(mode: mode, tonalCenterPitchClass: center)
         let developmentContext = contextFor(origin: originMotif, current: motif)
         let candidates = generator.developmentCandidates(
             origin: originMotif,
             current: motif,
-            pitchContext: context
+            pitchContext: pitchContext
         )
         guard let selected = arbiter.choose(from: candidates, context: developmentContext) else {
             return nil
         }
-        let beatMicroseconds = 60_000_000 / musicalStateConfiguration.tempoBPM
-        let availableAt = max(
-            motif.finalizedAtMicroseconds,
-            availableAtMicroseconds ?? motif.finalizedAtMicroseconds
-        )
-        let start = nextBeat(after: availableAt, beat: beatMicroseconds)
+        return (originMotif.id, center, developmentContext, candidates, selected)
+    }
+
+    private mutating func finalize(
+        motif: Motif,
+        selected: ConversationResponseCandidate,
+        tonalCenterPitchClass center: UInt8,
+        startMicroseconds start: UInt64,
+        decisionSource: BassDecisionSource
+    ) -> BassBarPlan {
         let phrase = render(selected, startMicroseconds: start, beatMicroseconds: beatMicroseconds)
         let barLength = musicalStateConfiguration.boundaryMicroseconds(
             afterBeats: musicalStateConfiguration.beatsPerBar
@@ -444,7 +678,7 @@ public struct ConversationEngine: Sendable {
         let decision = decision(for: selected.relationship)
         let responseID = nextResponseID
         let lineage = ConversationLineage(
-            originMotifID: originMotif.id,
+            originMotifID: originMotif?.id ?? motif.id,
             sourceMotifID: motif.id,
             responseID: responseID,
             parentResponseID: previousResponseID,
@@ -465,7 +699,7 @@ public struct ConversationEngine: Sendable {
             chord: nil,
             usedHeldChord: false,
             decision: decision,
-            decisionSource: .rules,
+            decisionSource: decisionSource,
             developmentStage: nil,
             tonalCenterPitchClass: center,
             conversationLineage: lineage,

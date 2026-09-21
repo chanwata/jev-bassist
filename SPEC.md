@@ -33,7 +33,7 @@ Jev is a decision maker, not a note generator. Its future typed output should re
 
 The exact schema will be fixed only after a rule-based bassist can already complete a live session.
 
-The local renderer may interpret those axes as a bass pocket, an ambient ensemble response, a transformed memory of the human's recent motif, or an eight-bar imitative development. Memory responses preserve recognizable contour and relative timing, enter only after a deliberate breath, and decay to silence when the player stops supplying new material. Fugue responses use one requested mode rather than a fixed chord progression, infer and lock the subject's tonal center, and preserve one qualifying subject for a complete answer-to-return cycle. Later human material waits as a candidate for the next cycle. Jev still never chooses individual notes.
+The local renderer may interpret those axes as a bass pocket, an ambient ensemble response, or a transformed memory of the human's motif. Memory responses preserve recognizable contour and relative timing, enter only after a deliberate breath, and decay to silence when the player stops supplying new material. Fugue responses use one requested mode rather than a fixed chord progression, infer and lock the origin's tonal center, and choose transformations from the changing performance context. Jev still never chooses individual notes.
 
 ## Architecture
 
@@ -180,6 +180,15 @@ The primary human evaluation is a short rating of “this felt like another play
 - attach origin, source motif, parent response, generation, and relationship lineage to every conversation plan;
 - quantize from the time a completed motif actually becomes available, never from an earlier inferred boundary that would schedule attacks in the past;
 - keep generated notes modal while never rewriting the captured human motif.
+
+### M12 P5: phrase-boundary Jev selection
+
+- ask Jev only to choose an ID from the bounded, locally rendered response candidates after a motif is finalized;
+- keep candidate generation, pitch projection, articulation, scheduling, and MIDI safety local;
+- tag each request with a monotonic revision and reject any completion after that revision expires or is superseded;
+- poll prepared results without blocking the live queue and reserve a future shared beat while remote work is pending;
+- use the local candidate at the musical deadline for timeout, low confidence, invalid output, transport failure, or an unknown candidate ID;
+- emit a complete secret-free decision trace separate from MIDI timing diagnostics.
 
 ## Out of scope for the early MVP
 

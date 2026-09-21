@@ -1755,7 +1755,8 @@ public struct LocalBassistEngine: Sendable {
 
     public init(
         configuration: LocalBassistConfiguration,
-        decisionProvider: any BassDecisionProvider = RuleBasedBassDecisionProvider()
+        decisionProvider: any BassDecisionProvider = RuleBasedBassDecisionProvider(),
+        conversationDecisionProvider: any ConversationDecisionProvider = LocalConversationDecisionProvider()
     ) {
         self.configuration = configuration
         tracker = MusicalStateTracker(configuration: configuration.musicalState)
@@ -1779,7 +1780,8 @@ public struct LocalBassistEngine: Sendable {
                 ConversationEngine(
                     musicalStateConfiguration: configuration.musicalState,
                     mode: $0,
-                    outputChannel: configuration.outputChannel
+                    outputChannel: configuration.outputChannel,
+                    decisionProvider: conversationDecisionProvider
                 )
             }
             : nil
@@ -1857,6 +1859,11 @@ public struct LocalBassistEngine: Sendable {
 
     public func cancelPendingDecisions() {
         decisionProvider.cancelPendingDecisions()
+        conversationEngine?.cancelPendingDecisions()
+    }
+
+    public mutating func yieldToHuman() {
+        conversationEngine?.yieldToHuman()
     }
 
     private mutating func makeUpdate(
@@ -2053,11 +2060,14 @@ public struct LocalBassistEngine: Sendable {
     ) -> [BassBarPlan] {
         guard let conversationEngine else { return [] }
         var nextEngine = conversationEngine
-        let plans = motifs.compactMap {
-            nextEngine.plan(
-                for: $0,
+        var plans = motifs.compactMap {
+            nextEngine.submit(
+                $0,
                 availableAtMicroseconds: availableAtMicroseconds
             )
+        }
+        if let resolved = nextEngine.advance(through: availableAtMicroseconds) {
+            plans.append(resolved)
         }
         self.conversationEngine = nextEngine
         return plans

@@ -70,6 +70,69 @@ final class ConversationEngineTests: XCTestCase {
         )
     }
 
+    func testPreparedRemoteCandidateNeverBlocksAndKeepsFutureOnset() throws {
+        let provider = DeferredConversationProvider()
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3,
+            decisionProvider: provider
+        )
+
+        XCTAssertNil(engine.submit(motif(), availableAtMicroseconds: 2_215_000))
+        XCTAssertEqual(provider.preparedRevisions, [1])
+        provider.complete(revision: 1, candidateID: "inversion")
+        let plan = try XCTUnwrap(engine.advance(through: 2_300_000))
+
+        XCTAssertEqual(plan.decisionSource, .jev)
+        XCTAssertEqual(plan.conversationLineage?.relationship, .inversion)
+        XCTAssertEqual(plan.phrase.startMicroseconds, 3_000_000)
+    }
+
+    func testRemoteDeadlineExpiresRevisionAndUsesLocalCandidate() throws {
+        let provider = DeferredConversationProvider()
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3,
+            decisionProvider: provider
+        )
+
+        XCTAssertNil(engine.submit(motif(), availableAtMicroseconds: 2_215_000))
+        XCTAssertNil(engine.advance(through: 2_899_999))
+        let plan = try XCTUnwrap(engine.advance(through: 2_900_000))
+
+        XCTAssertEqual(plan.decisionSource, .fallback)
+        XCTAssertEqual(plan.conversationLineage?.relationship, .echo)
+        XCTAssertEqual(provider.expiredRevisions, [1])
+    }
+
+    func testHumanReentryExpiresPendingRemoteResponse() throws {
+        let provider = DeferredConversationProvider()
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3,
+            decisionProvider: provider
+        )
+
+        XCTAssertNil(engine.submit(motif(), availableAtMicroseconds: 2_215_000))
+        engine.yieldToHuman()
+        provider.complete(revision: 1, candidateID: "inversion")
+
+        XCTAssertNil(engine.advance(through: 3_500_000))
+        XCTAssertEqual(provider.expiredRevisions, [1])
+    }
+
     private func motif(
         id: UInt64 = 1,
         pitches: [UInt8] = [62, 65, 67],
@@ -112,5 +175,49 @@ final class ConversationEngineTests: XCTestCase {
             ),
             finalizedAtMicroseconds: finalizedAt
         )
+    }
+}
+
+private final class DeferredConversationProvider: ConversationDecisionProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var inputs: [UInt64: ConversationSelectionInput] = [:]
+    private var completed: [UInt64: String] = [:]
+    private(set) var preparedRevisions: [UInt64] = []
+    private(set) var expiredRevisions: [UInt64] = []
+
+    func prepare(_ input: ConversationSelectionInput) {
+        lock.lock()
+        inputs[input.revision] = input
+        preparedRevisions.append(input.revision)
+        lock.unlock()
+    }
+
+    func resolution(
+        for input: ConversationSelectionInput
+    ) -> ConversationSelectionResolution? {
+        lock.lock()
+        let candidateID = completed.removeValue(forKey: input.revision)
+        lock.unlock()
+        return candidateID.map {
+            ConversationSelectionResolution(candidateID: $0, source: .jev)
+        }
+    }
+
+    func expire(revision: UInt64) {
+        lock.lock()
+        inputs.removeValue(forKey: revision)
+        completed.removeValue(forKey: revision)
+        expiredRevisions.append(revision)
+        lock.unlock()
+    }
+
+    func cancelPendingDecisions() {}
+
+    func complete(revision: UInt64, candidateID: String) {
+        lock.lock()
+        if inputs[revision] != nil {
+            completed[revision] = candidateID
+        }
+        lock.unlock()
     }
 }
