@@ -10,6 +10,18 @@ private struct SoundcheckOptions {
     let channel: UInt8
 }
 
+private struct EvaluationOptions {
+    let inputPath: String
+    let outputPath: String
+    let tempoBPM: Double
+    let beatsPerBar: Int
+    let introBars: Int
+    let outputChannel: UInt8
+    let progression: [ChordCandidate]
+    let style: AccompanimentStyle
+    let mode: MusicalMode?
+}
+
 private enum BrainMode: String, Sendable {
     case rules
     case jev
@@ -38,6 +50,7 @@ private enum Command {
     case monitor(source: String?)
     case capture(outputPath: String, source: String?)
     case replay(inputPath: String, tempoBPM: Double, beatsPerBar: Int)
+    case evaluate(EvaluationOptions)
     case soundcheck(SoundcheckOptions)
     case jam(JamOptions)
     case help
@@ -61,6 +74,8 @@ private enum Command {
             self = try Self.captureCommand(arguments: Array(arguments.dropFirst()))
         case "replay":
             self = try Self.replayCommand(arguments: Array(arguments.dropFirst()))
+        case "evaluate":
+            self = .evaluate(try Self.evaluationOptions(in: Array(arguments.dropFirst())))
         case "soundcheck":
             self = .soundcheck(try Self.soundcheckOptions(in: Array(arguments.dropFirst())))
         case "jam":
@@ -135,6 +150,75 @@ private enum Command {
         return SoundcheckOptions(
             destination: destination,
             channel: try channelOption(options, name: "--channel", default: 3)
+        )
+    }
+
+    private static func evaluationOptions(in arguments: [String]) throws -> EvaluationOptions {
+        guard arguments.count >= 2,
+              !arguments[0].hasPrefix("-"),
+              !arguments[1].hasPrefix("-") else {
+            throw CLIError.invalidArguments(
+                "Use 'evaluate INPUT OUTPUT [--bpm BPM] [--beats-per-bar N] [--intro-bars N] [--output-channel N] [--style STYLE] [--mode MODE] [--progression CHORDS]'."
+            )
+        }
+        let optionArguments = Array(arguments.dropFirst(2))
+        let options = try optionValues(
+            in: optionArguments,
+            allowed: [
+                "--bpm", "--beats-per-bar", "--intro-bars", "--output-channel",
+                "--style", "--mode", "--progression"
+            ],
+            usage: "evaluate INPUT OUTPUT [options]"
+        )
+        let tempoBPM = try doubleOption(options, name: "--bpm", default: 120)
+        let beatsPerBar = try intOption(options, name: "--beats-per-bar", default: 4)
+        let introBars = try intOption(options, name: "--intro-bars", default: 4)
+        let outputChannel = try channelOption(options, name: "--output-channel", default: 3)
+        let styleName = options["--style"] ?? AccompanimentStyle.bass.rawValue
+        guard let style = AccompanimentStyle(rawValue: styleName) else {
+            throw CLIError.invalidArguments(
+                "--style must be 'bass', 'ambient', 'memory', or 'fugue'."
+            )
+        }
+        let mode: MusicalMode?
+        if let modeName = options["--mode"] {
+            guard let parsed = MusicalMode(rawValue: modeName.lowercased()) else {
+                throw CLIError.invalidArguments(
+                    "--mode must be ionian, dorian, phrygian, lydian, mixolydian, aeolian, or locrian."
+                )
+            }
+            mode = parsed
+        } else {
+            mode = nil
+        }
+        let progression: [ChordCandidate]
+        if let progressionText = options["--progression"] {
+            progression = try ChordProgressionParser.parse(progressionText)
+        } else {
+            progression = []
+        }
+        let musicalState = try MusicalStateConfiguration(
+            tempoBPM: tempoBPM,
+            beatsPerBar: beatsPerBar
+        )
+        _ = try LocalBassistConfiguration(
+            musicalState: musicalState,
+            introBars: introBars,
+            outputChannel: outputChannel,
+            progression: progression,
+            style: style,
+            mode: mode
+        )
+        return EvaluationOptions(
+            inputPath: arguments[0],
+            outputPath: arguments[1],
+            tempoBPM: tempoBPM,
+            beatsPerBar: beatsPerBar,
+            introBars: introBars,
+            outputChannel: outputChannel,
+            progression: progression,
+            style: style,
+            mode: mode
         )
     }
 
@@ -337,6 +421,7 @@ USAGE
   jev-bassist monitor [--source NAME]
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
+  jev-bassist evaluate INPUT OUTPUT [--bpm BPM] [--beats-per-bar N] [--intro-bars N] [--output-channel N] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS]
   jev-bassist soundcheck --destination NAME [--channel N]
   jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS] [--ui]
   jev-bassist help
@@ -347,6 +432,7 @@ COMMANDS
   monitor      Print Note On and Note Off events. With no source, listen to all sources.
   capture      Record a versioned JSON fixture. Press Return to stop and save.
   replay       Replay into the analyzer and print state. No MIDI output is sent.
+  evaluate     Run a fixture through the local ensemble and save a deterministic trace. No MIDI output is sent.
   soundcheck   Send three short bass notes to one destination, then silence it.
   jam          Listen locally and schedule bass or ambient accompaniment after the intro.
 """
@@ -503,6 +589,34 @@ private func runReplay(inputPath: String, tempoBPM: Double, beatsPerBar: Int) th
     for snapshot in try tracker.finish(through: fixture.durationMicroseconds) {
         print(format(snapshot))
     }
+}
+
+private func runEvaluation(_ options: EvaluationOptions) throws {
+    let inputURL = fileURL(for: options.inputPath)
+    let outputURL = fileURL(for: options.outputPath)
+    let fixture = try MIDISessionFixtureCodec.decode(Data(contentsOf: inputURL))
+    let configuration = try LocalBassistConfiguration(
+        musicalState: MusicalStateConfiguration(
+            tempoBPM: options.tempoBPM,
+            beatsPerBar: options.beatsPerBar
+        ),
+        introBars: options.introBars,
+        outputChannel: options.outputChannel,
+        progression: options.progression,
+        style: options.style,
+        mode: options.mode
+    )
+    let trace = try LocalBassistSessionEvaluator().evaluate(
+        fixture: fixture,
+        configuration: configuration
+    )
+    try SessionEvaluationCodec.write(trace, to: outputURL)
+    let eventCount = trace.plans.reduce(0) { $0 + $1.phrase.messages.count }
+    print(
+        "Saved deterministic \(trace.policy.rawValue) evaluation with "
+            + "\(trace.plans.count) plans and \(eventCount) scheduled MIDI events "
+            + "to \(outputURL.path). No MIDI output was sent."
+    )
 }
 
 private func runSoundcheck(_ options: SoundcheckOptions) throws {
@@ -1043,6 +1157,8 @@ do {
             tempoBPM: tempoBPM,
             beatsPerBar: beatsPerBar
         )
+    case let .evaluate(options):
+        try runEvaluation(options)
     case let .soundcheck(options):
         try runSoundcheck(options)
     case let .jam(options):

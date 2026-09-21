@@ -134,6 +134,15 @@ The primary human evaluation is a short rating of “this felt like another play
 - derive fugue harmony from one selected mode and a subject-inferred tonal center instead of a fixed progression;
 - make note attacks produce broad membrane displacement, full-field flash, and expanding shockwaves.
 
+### M12 P0: deterministic conversation evaluation
+
+- preserve the existing analyzer-only `replay` command;
+- run a captured input fixture through the complete local ensemble engine without opening a MIDI output;
+- save the input, exact configuration, snapshots, bounded rule decisions, generated plans, and scheduled MIDI messages in one versioned trace;
+- make identical fixture/configuration evaluations byte-stable enough for direct implementation comparisons;
+- keep this milestone observational: it records the current fixed eight-stage fugue but does not describe that behavior as conversational;
+- use the trace foundation for duration-aware phrase memory, short-horizon scheduling, and a later context-driven response engine.
+
 ## Out of scope for the early MVP
 
 - audio transcription;

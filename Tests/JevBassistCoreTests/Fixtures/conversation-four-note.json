@@ -1,0 +1,74 @@
+{
+  "durationMicroseconds" : 4000000,
+  "events" : [
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOn",
+      "note" : 62,
+      "offsetMicroseconds" : 0,
+      "velocity" : 96
+    },
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOff",
+      "note" : 62,
+      "offsetMicroseconds" : 160000,
+      "velocity" : 0
+    },
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOn",
+      "note" : 65,
+      "offsetMicroseconds" : 300000,
+      "velocity" : 78
+    },
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOff",
+      "note" : 65,
+      "offsetMicroseconds" : 660000,
+      "velocity" : 0
+    },
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOn",
+      "note" : 67,
+      "offsetMicroseconds" : 820000,
+      "velocity" : 88
+    },
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOff",
+      "note" : 67,
+      "offsetMicroseconds" : 1060000,
+      "velocity" : 0
+    },
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOn",
+      "note" : 69,
+      "offsetMicroseconds" : 1320000,
+      "velocity" : 72
+    },
+    {
+      "channel" : 1,
+      "hostTime" : 0,
+      "kind" : "noteOff",
+      "note" : 69,
+      "offsetMicroseconds" : 1840000,
+      "velocity" : 0
+    }
+  ],
+  "formatVersion" : 1,
+  "sourceNames" : [
+    "conversation-fixture"
+  ],
+  "startedAt" : "2026-09-21T00:00:00.000Z"
+}
