@@ -1745,10 +1745,9 @@ public struct LocalBassistEngine: Sendable {
                         barIndex: targetBarIndex,
                         startMicroseconds: snapshot.endMicroseconds,
                         musicalStateConfiguration: configuration.musicalState,
-                        memory: fugueDevelopment?.memory,
+                        memory: memory,
                         previousNotes: previousPhraseNotes,
-                        humanAverageVelocity: snapshot.state.averageVelocity,
-                        stage: fugueDevelopment?.stage ?? .answer
+                        humanAverageVelocity: snapshot.state.averageVelocity
                     )
                     phrase = result.phrase
                     expression = result.expression
@@ -1760,9 +1759,10 @@ public struct LocalBassistEngine: Sendable {
                         barIndex: targetBarIndex,
                         startMicroseconds: snapshot.endMicroseconds,
                         musicalStateConfiguration: configuration.musicalState,
-                        memory: memory,
+                        memory: fugueDevelopment?.memory,
                         previousNotes: previousPhraseNotes,
-                        humanAverageVelocity: snapshot.state.averageVelocity
+                        humanAverageVelocity: snapshot.state.averageVelocity,
+                        stage: fugueDevelopment?.stage ?? .answer
                     )
                     phrase = result.phrase
                     expression = result.expression
