@@ -22,13 +22,34 @@ final class SessionEvaluationTests: XCTestCase {
             try SessionEvaluationCodec.encode(first),
             try SessionEvaluationCodec.encode(second)
         )
-        XCTAssertEqual(first.formatVersion, 1)
+        XCTAssertEqual(first.formatVersion, 2)
         XCTAssertEqual(first.policy, .rules)
         XCTAssertEqual(first.input, fixture)
         XCTAssertEqual(first.configuration.style, .fugue)
         XCTAssertEqual(first.configuration.mode, .dorian)
-        XCTAssertEqual(first.plans.map(\.developmentStage), [.answer, .sequence])
-        XCTAssertFalse(first.plans[0].phrase.messages.isEmpty)
+        XCTAssertEqual(first.plans.map(\.developmentStage), [nil, .answer])
+        XCTAssertTrue(first.plans[0].phrase.messages.isEmpty)
+        XCTAssertFalse(first.plans[1].phrase.messages.isEmpty)
+        XCTAssertEqual(first.performedNotes.count, 4)
+        XCTAssertEqual(
+            first.performedNotes.map(\.durationMicroseconds),
+            [160_000, 360_000, 240_000, 520_000]
+        )
+        XCTAssertEqual(first.phraseObservations.count, 1)
+        XCTAssertEqual(first.motifs.count, 1)
+        XCTAssertEqual(
+            first.motifs[0].notes.map(\.relativeOnsetBeats),
+            [0, 0.6, 1.64, 2.64]
+        )
+        XCTAssertEqual(
+            first.motifs[0].notes.map(\.durationBeats),
+            [0.32, 0.72, 0.48, 1.04]
+        )
+        XCTAssertEqual(
+            first.motifs[0].notes.map(\.restBeforeBeats),
+            [0, 0.28, 0.32, 0.52]
+        )
+        XCTAssertTrue(first.performanceDiagnostics.isEmpty)
         XCTAssertTrue(
             first.plans.flatMap { $0.phrase.messages }.allSatisfy { $0.channel == 3 }
         )
@@ -79,6 +100,31 @@ final class SessionEvaluationTests: XCTestCase {
                 .unsupportedFormatVersion(99)
             )
         }
+    }
+
+    func testEvaluationCodecReadsVersionOneTraceWithoutPhraseFields() throws {
+        let trace = try LocalBassistSessionEvaluator().evaluate(
+            fixture: loadFixture(),
+            configuration: fugueConfiguration()
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SessionEvaluationCodec.encode(trace))
+                as? [String: Any]
+        )
+        object["formatVersion"] = 1
+        object.removeValue(forKey: "performedNotes")
+        object.removeValue(forKey: "phraseObservations")
+        object.removeValue(forKey: "motifs")
+        object.removeValue(forKey: "performanceDiagnostics")
+        let decoded = try SessionEvaluationCodec.decode(
+            JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.formatVersion, 1)
+        XCTAssertTrue(decoded.performedNotes.isEmpty)
+        XCTAssertTrue(decoded.phraseObservations.isEmpty)
+        XCTAssertTrue(decoded.motifs.isEmpty)
+        XCTAssertTrue(decoded.performanceDiagnostics.isEmpty)
     }
 
     private func loadFixture() throws -> MIDISessionFixture {

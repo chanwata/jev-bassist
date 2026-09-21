@@ -331,9 +331,11 @@ swift run jev-bassist evaluate \
   --mode dorian
 ```
 
-The output is a versioned, secret-free JSON trace containing the original input fixture, exact configuration, local rule policy, every beat/bar snapshot, every bar plan, and every scheduled Note On/Off message. It does not contact Jev, wait in real time, or open a CoreMIDI output. The command refuses to overwrite an existing trace so two implementations can be evaluated into separate files and compared directly.
+The output is a versioned, secret-free JSON trace containing the original input fixture, exact configuration, local rule policy, completed performed notes, phrase observations, remembered motifs, every beat/bar snapshot, every bar plan, and every scheduled Note On/Off message. It does not contact Jev, wait in real time, or open a CoreMIDI output. The command refuses to overwrite an existing trace so two implementations can be evaluated into separate files and compared directly. Trace v2 adds duration-aware performance and motif data; the decoder continues to accept v1 traces.
 
-This evaluation command records the current engine faithfully; it does not make the current eight-stage fugue conversational. The next milestones will first add note-duration-aware motif memory and interruptible short-horizon scheduling, then replace the fixed development path.
+The duration-aware memory pairs Note On/Off events, distinguishes observed releases from releases inferred at session end, groups simultaneous attacks, and uses adaptive silence to finalize phrases without splitting them at bar lines. A bounded immutable motif keeps relative onset, duration, rest, accent, and characteristic intervals. Low-confidence chord extraction is not promoted to a melody subject.
+
+This evaluation command records the current engine faithfully; it does not make the current eight-stage fugue conversational. The next milestones add interruptible short-horizon scheduling, then replace the fixed development path with context-driven responses.
 
 ## Build and test
 
@@ -346,9 +348,9 @@ Pure MIDI decoding, fixture validation, replay, deterministic ensemble evaluatio
 
 ## Planned path
 
-1. Preserve Note On/Off duration, accent, rests, and cross-bar phrasing in a versioned motif memory.
-2. Replace whole-bar output submission with a safe short-horizon scheduler that can reconsider unsent notes when the player re-enters.
-3. Replace the fixed fugue development with a one-voice modal response whose connection to the human motif is audible before adding further development.
+1. Replace whole-bar output submission with a safe short-horizon scheduler that can reconsider unsent notes when the player re-enters.
+2. Replace the fixed fugue development with a one-voice modal response whose connection to the human motif is audible before adding further development.
+3. Add context-driven development and original-subject return only after the short response passes live listening evaluation.
 4. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.

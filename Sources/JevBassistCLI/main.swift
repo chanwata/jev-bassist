@@ -614,7 +614,8 @@ private func runEvaluation(_ options: EvaluationOptions) throws {
     let eventCount = trace.plans.reduce(0) { $0 + $1.phrase.messages.count }
     print(
         "Saved deterministic \(trace.policy.rawValue) evaluation with "
-            + "\(trace.plans.count) plans and \(eventCount) scheduled MIDI events "
+            + "\(trace.plans.count) plans, \(trace.motifs.count) remembered motifs, "
+            + "and \(eventCount) scheduled MIDI events "
             + "to \(outputURL.path). No MIDI output was sent."
     )
 }
