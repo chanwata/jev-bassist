@@ -1601,6 +1601,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
     public let decisionSource: BassDecisionSource
     public let developmentStage: MotifDevelopmentStage?
     public let tonalCenterPitchClass: UInt8?
+    public let conversationLineage: ConversationLineage?
     public let phrase: BassPhrase
     public let expression: EnsembleExpression
 
@@ -1613,6 +1614,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         decisionSource: BassDecisionSource = .rules,
         developmentStage: MotifDevelopmentStage? = nil,
         tonalCenterPitchClass: UInt8? = nil,
+        conversationLineage: ConversationLineage? = nil,
         phrase: BassPhrase,
         expression: EnsembleExpression = .quiet
     ) {
@@ -1624,6 +1626,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         self.decisionSource = decisionSource
         self.developmentStage = developmentStage
         self.tonalCenterPitchClass = tonalCenterPitchClass
+        self.conversationLineage = conversationLineage
         self.phrase = phrase
         self.expression = expression
     }
@@ -1795,7 +1798,10 @@ public struct LocalBassistEngine: Sendable {
         performanceTracker = nextPerformanceTracker
         phraseSegmenter = nextPhraseSegmenter
         let motifs = remember(observationsBeforeEvent)
-        let conversationPlans = plans(for: motifs)
+        let conversationPlans = plans(
+            for: motifs,
+            availableAtMicroseconds: event.offsetMicroseconds
+        )
         return Self.enriching(
             makeUpdate(from: snapshots),
             performance: performance,
@@ -1814,7 +1820,10 @@ public struct LocalBassistEngine: Sendable {
         let snapshots = try tracker.advance(through: offsetMicroseconds)
         phraseSegmenter = nextPhraseSegmenter
         let motifs = remember(observations)
-        let conversationPlans = plans(for: motifs)
+        let conversationPlans = plans(
+            for: motifs,
+            availableAtMicroseconds: offsetMicroseconds
+        )
         return Self.enriching(
             makeUpdate(from: snapshots),
             observations: observations,
@@ -1833,7 +1842,10 @@ public struct LocalBassistEngine: Sendable {
         performanceTracker = nextPerformanceTracker
         phraseSegmenter = nextPhraseSegmenter
         let motifs = remember(observations)
-        let conversationPlans = plans(for: motifs)
+        let conversationPlans = plans(
+            for: motifs,
+            availableAtMicroseconds: offsetMicroseconds
+        )
         return Self.enriching(
             makeUpdate(from: snapshots),
             performance: performance,
@@ -2035,9 +2047,20 @@ public struct LocalBassistEngine: Sendable {
         }
     }
 
-    private func plans(for motifs: [Motif]) -> [BassBarPlan] {
+    private mutating func plans(
+        for motifs: [Motif],
+        availableAtMicroseconds: UInt64
+    ) -> [BassBarPlan] {
         guard let conversationEngine else { return [] }
-        return motifs.compactMap { conversationEngine.plan(for: $0) }
+        var nextEngine = conversationEngine
+        let plans = motifs.compactMap {
+            nextEngine.plan(
+                for: $0,
+                availableAtMicroseconds: availableAtMicroseconds
+            )
+        }
+        self.conversationEngine = nextEngine
+        return plans
     }
 
     private mutating func phraseMemory(

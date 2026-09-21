@@ -339,6 +339,8 @@ Live accompaniment uses a 50 ms rolling MIDI horizon. A generated phrase may des
 
 For `--style fugue`, a finalized motif now enters the local conversation engine instead of the legacy fixed eight-bar development cycle. The first response is deliberately conservative: one modal voice on the next shared beat, preserving the motif's relative rhythm, duration, rests, and accents. The candidate set is bounded to silence, a close echo, a final-note variation, and a held tone; the local arbiter may choose silence when no safe recognizable answer exists.
 
+After the first echo, development is selected from the live relationship rather than a stage clock. Dense playing invites augmentation, register displacement invites a modal sequence, close contour repetition invites inversion, and longer material can be fragmented. Each answer records its motif lineage. Once accumulated transformations cross a conservative divergence limit, the engine restates the original captured motif and begins a new arc without mutating that origin.
+
 The evaluation command records this conversation path deterministically. The next milestones add context-driven development and original-subject return, then compare local and Jev candidate selection on the same traces.
 
 ## Build and test
@@ -352,8 +354,7 @@ Pure MIDI decoding, fixture validation, replay, deterministic ensemble evaluatio
 
 ## Planned path
 
-1. Add context-driven development and original-subject return only after the short response passes live listening evaluation.
-2. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
-3. Carry motif lineage and confirmed scheduler events into the performance visual.
+1. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
+2. Carry motif lineage and confirmed scheduler events into the performance visual.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.
