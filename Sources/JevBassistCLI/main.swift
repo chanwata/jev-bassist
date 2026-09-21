@@ -425,8 +425,7 @@ private func format(_ plan: BassBarPlan, style: AccompanimentStyle) -> String {
 }
 
 private func pitchClassName(_ pitchClass: UInt8) -> String {
-    return ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        [Int(pitchClass % 12)]
+    return ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][Int(pitchClass % 12)]
 }
 
 private let jevTraceLock = NSLock()
