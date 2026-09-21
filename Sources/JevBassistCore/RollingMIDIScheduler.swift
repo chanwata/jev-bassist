@@ -23,15 +23,18 @@ public struct RollingMIDICancellation: Codable, Equatable, Sendable {
     public let revision: UInt64
     public let canceledEventIDs: [UInt64]
     public let canceledNoteIDs: [UInt64]
+    public let canceledRevisions: [UInt64]
 
     public init(
         revision: UInt64,
         canceledEventIDs: [UInt64],
-        canceledNoteIDs: [UInt64]
+        canceledNoteIDs: [UInt64],
+        canceledRevisions: [UInt64] = []
     ) {
         self.revision = revision
         self.canceledEventIDs = canceledEventIDs
         self.canceledNoteIDs = canceledNoteIDs
+        self.canceledRevisions = canceledRevisions
     }
 }
 
@@ -155,7 +158,8 @@ public struct RollingMIDIScheduler: Sendable {
         return RollingMIDICancellation(
             revision: revision,
             canceledEventIDs: canceledEvents.map(\.id).sorted(),
-            canceledNoteIDs: canceledNoteIDs.sorted()
+            canceledNoteIDs: canceledNoteIDs.sorted(),
+            canceledRevisions: Array(Set(canceledEvents.map(\.revision))).sorted()
         )
     }
 
@@ -164,7 +168,8 @@ public struct RollingMIDIScheduler: Sendable {
         let cancellation = RollingMIDICancellation(
             revision: revision,
             canceledEventIDs: pendingEvents.map(\.id).sorted(),
-            canceledNoteIDs: Array(Set(pendingEvents.compactMap(\.noteID))).sorted()
+            canceledNoteIDs: Array(Set(pendingEvents.compactMap(\.noteID))).sorted(),
+            canceledRevisions: Array(Set(pendingEvents.map(\.revision))).sorted()
         )
         pendingEvents.removeAll(keepingCapacity: false)
         return cancellation

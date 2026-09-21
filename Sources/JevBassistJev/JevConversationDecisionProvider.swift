@@ -12,9 +12,12 @@ public struct JevConversationRequest: Codable, Equatable, Sendable {
         self.model = model
         questions = [
             "response": JevChoiceQuestion(
-                instructions: "Choose one supplied response candidate for a listening one-voice exchange. Preserve recognizable lineage, prefer space, and use return when accumulated divergence is high.",
+                instructions: "Choose one supplied one-voice response. Favor a traceable relationship to the player's phrase, coherent modal voice leading, a purposeful arrival, and room for the player. Treat pitches and timing as immutable local candidates; use return when divergence is high.",
                 criteria: Dictionary(uniqueKeysWithValues: input.candidates.map {
-                    ($0.id, "\($0.relationship.rawValue); \($0.noteCount) notes; recognition \($0.recognition); space \($0.space); voice leading \($0.voiceLeading)")
+                    (
+                        $0.id,
+                        "\($0.relationship.rawValue); pitches \($0.pitches); intervals \($0.pitchIntervals); onsets \($0.relativeOnsets); durations \($0.durations); recognition \($0.recognition); contour \($0.contourIntegrity); voice leading \($0.voiceLeading); cadence \($0.cadence); continuity \($0.continuity); modal fit \($0.modalFit); space \($0.space); maximum leap \($0.maximumLeap)"
+                    )
                 })
             )
         ]

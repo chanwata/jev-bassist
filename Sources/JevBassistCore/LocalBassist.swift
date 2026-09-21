@@ -1866,6 +1866,14 @@ public struct LocalBassistEngine: Sendable {
         conversationEngine?.yieldToHuman()
     }
 
+    public mutating func acknowledgeCommittedConversationNote(responseID: UInt64) {
+        conversationEngine?.acknowledgeCommittedResponseNote(responseID: responseID)
+    }
+
+    public mutating func discardUncommittedConversationResponse(responseID: UInt64) {
+        conversationEngine?.discardUncommittedResponse(responseID: responseID)
+    }
+
     private mutating func makeUpdate(
         from snapshots: [MusicalStateSnapshot]
     ) -> LocalBassistUpdate {

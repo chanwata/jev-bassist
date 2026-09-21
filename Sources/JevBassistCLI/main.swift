@@ -977,6 +977,14 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         }
         if yieldingToHuman {
             let cancellation = scheduler.yieldToHuman(at: currentOffsetMicroseconds)
+            for revision in cancellation.canceledRevisions {
+                if let lineage = schedulerLineage[revision] {
+                    engine.discardUncommittedConversationResponse(
+                        responseID: lineage.responseID
+                    )
+                }
+                schedulerLineage.removeValue(forKey: revision)
+            }
             if !cancellation.canceledEventIDs.isEmpty {
                 print(
                     "Human re-entry canceled \(cancellation.canceledEventIDs.count) "
@@ -1004,6 +1012,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             due.map(\.message),
             anchorHostTime: outputAnchor
         )
+        for event in due where event.message.kind == .noteOn {
+            if let responseID = schedulerLineage[event.revision]?.responseID {
+                engine.acknowledgeCommittedConversationNote(responseID: responseID)
+            }
+        }
         if options.webUI {
             for event in due {
                 let message = event.message
@@ -1118,7 +1131,10 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 responseID: lineage?.responseID,
                 parentResponseID: lineage?.parentResponseID,
                 generation: lineage?.generation,
-                relationship: lineage?.relationship.rawValue
+                relationship: lineage?.relationship.rawValue,
+                originGesture: lineage?.originGesture,
+                sourceGesture: lineage?.sourceGesture,
+                responseGesture: lineage?.responseGesture
             )
         )
         nextVisualEventID += 1

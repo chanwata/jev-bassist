@@ -22,6 +22,18 @@ public enum MusicalMode: String, Codable, CaseIterable, Equatable, Sendable {
     }
 }
 
+public struct ModalCenterAssessment: Codable, Equatable, Sendable {
+    public let tonalCenterPitchClass: UInt8
+    public let confidence: Double
+    public let scoreMargin: Double
+
+    public init(tonalCenterPitchClass: UInt8, confidence: Double, scoreMargin: Double) {
+        self.tonalCenterPitchClass = tonalCenterPitchClass % 12
+        self.confidence = min(1, max(0, confidence))
+        self.scoreMargin = max(0, scoreMargin)
+    }
+}
+
 /// Infers a stable tonal center from one subject, then derives one diatonic
 /// triad for each formal development stage. No fixed chord list is required.
 public struct ModalHarmonyPlanner: Sendable {
@@ -32,6 +44,10 @@ public struct ModalHarmonyPlanner: Sendable {
     }
 
     public func inferTonalCenter(from notes: [HumanPhraseNote]) -> UInt8? {
+        assessTonalCenter(from: notes)?.tonalCenterPitchClass
+    }
+
+    public func assessTonalCenter(from notes: [HumanPhraseNote]) -> ModalCenterAssessment? {
         guard let first = notes.first else { return nil }
         let firstPitchClass = Int(first.note % 12)
         let lastPitchClass = Int(notes.last?.note ?? first.note) % 12
@@ -43,22 +59,42 @@ public struct ModalHarmonyPlanner: Sendable {
                 let weight = 1 + Double(note.velocity) / 254
                 score += modeIntervals.contains(relative) ? weight : -weight * 4
                 if relative == 0 {
-                    score += index == notes.count - 1 ? 1.6 : 0.45
+                    if index == 0 {
+                        score += 1
+                    } else if index == notes.count - 1 {
+                        score += 1.4
+                    } else {
+                        score += 0.45
+                    }
                 } else if relative == 7 {
                     score += 0.18
                 }
             }
-            if tonic == firstPitchClass { score += 3.2 }
-            if tonic == lastPitchClass { score += 2.4 }
+            if tonic == firstPitchClass { score += 4 }
+            if tonic == lastPitchClass { score += 1.6 }
             return (tonic, score)
         }
-        let best = candidates.max {
-            if $0.score != $1.score { return $0.score < $1.score }
+        let ranked = candidates.sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
             let left = ($0.tonic - firstPitchClass + 12) % 12
             let right = ($1.tonic - firstPitchClass + 12) % 12
-            return left > right
+            return left < right
         }
-        return best.map { UInt8($0.tonic) }
+        guard let best = ranked.first else { return nil }
+        let runnerUp = ranked.dropFirst().first?.score ?? best.score
+        let margin = max(0, best.score - runnerUp)
+        let fitCount = notes.filter { note in
+            let relative = (Int(note.note % 12) - best.tonic + 12) % 12
+            return modeIntervals.contains(relative)
+        }.count
+        let fit = Double(fitCount) / Double(notes.count)
+        let evidence = min(1, Double(notes.count) / 6)
+        let confidence = fit * 0.45 + min(1, margin / 5) * 0.4 + evidence * 0.15
+        return ModalCenterAssessment(
+            tonalCenterPitchClass: UInt8(best.tonic),
+            confidence: confidence,
+            scoreMargin: margin
+        )
     }
 
     public func chord(

@@ -16,7 +16,7 @@ final class ConversationEngineTests: XCTestCase {
         XCTAssertEqual(plan.phrase.startMicroseconds, 2_500_000)
         XCTAssertEqual(plan.developmentStage, nil)
         XCTAssertEqual(noteOns.map(\.offsetMicroseconds), [2_500_000, 2_800_000, 3_320_000])
-        XCTAssertEqual(noteOns.map(\.note), [62, 65, 67])
+        XCTAssertEqual(noteOns.map(\.note), [50, 53, 55])
         XCTAssertEqual(noteOns.count, noteOffs.count)
         XCTAssertLessThan(noteOffs[0].offsetMicroseconds, noteOns[1].offsetMicroseconds)
         XCTAssertLessThan(noteOffs[1].offsetMicroseconds, noteOns[2].offsetMicroseconds)
@@ -29,6 +29,44 @@ final class ConversationEngineTests: XCTestCase {
         XCTAssertEqual(context.conservativeProjection(62), 62)
         XCTAssertEqual(context.conservativeProjection(66), 65)
         XCTAssertTrue(context.contains(context.conservativeProjection(66)))
+    }
+
+    func testPhrasePlacementPreservesContourAcrossFormerRegisterBoundary() {
+        let context = ModalPitchContext(
+            mode: .ionian,
+            tonalCenterPitchClass: 0
+        )
+
+        let placed = context.placePhrase([52, 53, 55])
+
+        XCTAssertEqual(placed, [52, 53, 55])
+        XCTAssertEqual(
+            zip(placed.dropFirst(), placed).map { later, earlier in
+                Int(later) - Int(earlier)
+            },
+            [1, 2]
+        )
+    }
+
+    func testHighSubjectMovesAsOnePhraseIntoCompanionRegister() {
+        let context = ModalPitchContext(
+            mode: .dorian,
+            tonalCenterPitchClass: 2
+        )
+
+        XCTAssertEqual(context.placePhrase([62, 65, 67]), [50, 53, 55])
+    }
+
+    func testModalInversionUsesScaleDegreesAndStaysSingleVoice() {
+        let context = ModalPitchContext(
+            mode: .dorian,
+            tonalCenterPitchClass: 2
+        )
+
+        let inversion = context.invertByScaleDegrees([62, 65, 67])
+
+        XCTAssertEqual(inversion, [62, 59, 57])
+        XCTAssertTrue(inversion.allSatisfy(context.contains))
     }
 
     func testContextualDevelopmentReturnsToImmutableOriginAfterDivergence() throws {
@@ -66,8 +104,10 @@ final class ConversationEngineTests: XCTestCase {
         XCTAssertEqual(returned.conversationLineage?.generation, 3)
         XCTAssertEqual(
             returned.phrase.messages.filter { $0.kind == .noteOn }.map(\.note),
-            [62, 65, 67]
+            [50, 53, 55]
         )
+        XCTAssertEqual(returned.conversationLineage?.originGesture.map(\.note), [62, 65, 67])
+        XCTAssertEqual(returned.conversationLineage?.responseGesture.map(\.note), [50, 53, 55])
     }
 
     func testPreparedRemoteCandidateNeverBlocksAndKeepsFutureOnset() throws {
@@ -131,6 +171,35 @@ final class ConversationEngineTests: XCTestCase {
 
         XCTAssertNil(engine.advance(through: 3_500_000))
         XCTAssertEqual(provider.expiredRevisions, [1])
+    }
+
+    func testConversationMemoryAdvancesOnlyAfterCommittedNoteOn() throws {
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3
+        )
+
+        let first = try XCTUnwrap(engine.submit(
+            motif(id: 1),
+            availableAtMicroseconds: 2_215_000
+        ))
+        let firstResponseID = try XCTUnwrap(first.conversationLineage?.responseID)
+        let beforeCommit = try XCTUnwrap(engine.submit(
+            motif(id: 2, finalizedAt: 4_215_000),
+            availableAtMicroseconds: 4_215_000
+        ))
+        XCTAssertNil(beforeCommit.conversationLineage?.parentResponseID)
+
+        engine.acknowledgeCommittedResponseNote(responseID: firstResponseID)
+        let afterCommit = try XCTUnwrap(engine.submit(
+            motif(id: 3, finalizedAt: 6_215_000),
+            availableAtMicroseconds: 6_215_000
+        ))
+        XCTAssertEqual(afterCommit.conversationLineage?.parentResponseID, firstResponseID)
     }
 
     private func motif(
