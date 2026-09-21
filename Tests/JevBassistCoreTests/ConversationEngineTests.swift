@@ -113,6 +113,26 @@ final class ConversationEngineTests: XCTestCase {
         XCTAssertEqual(provider.expiredRevisions, [1])
     }
 
+    func testHumanReentryExpiresPendingRemoteResponse() throws {
+        let provider = DeferredConversationProvider()
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3,
+            decisionProvider: provider
+        )
+
+        XCTAssertNil(engine.submit(motif(), availableAtMicroseconds: 2_215_000))
+        engine.yieldToHuman()
+        provider.complete(revision: 1, candidateID: "inversion")
+
+        XCTAssertNil(engine.advance(through: 3_500_000))
+        XCTAssertEqual(provider.expiredRevisions, [1])
+    }
+
     private func motif(
         id: UInt64 = 1,
         pitches: [UInt8] = [62, 65, 67],

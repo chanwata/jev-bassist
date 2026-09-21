@@ -624,6 +624,12 @@ public struct ConversationEngine: Sendable {
         )
     }
 
+    public mutating func yieldToHuman() {
+        guard let pendingConversation else { return }
+        decisionProvider.expire(revision: pendingConversation.selectionInput.revision)
+        self.pendingConversation = nil
+    }
+
     public func cancelPendingDecisions() {
         decisionProvider.cancelPendingDecisions()
     }

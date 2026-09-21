@@ -1862,6 +1862,10 @@ public struct LocalBassistEngine: Sendable {
         conversationEngine?.cancelPendingDecisions()
     }
 
+    public mutating func yieldToHuman() {
+        conversationEngine?.yieldToHuman()
+    }
+
     private mutating func makeUpdate(
         from snapshots: [MusicalStateSnapshot]
     ) -> LocalBassistUpdate {
