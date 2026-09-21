@@ -405,7 +405,8 @@ private func format(_ plan: BassBarPlan, style: AccompanimentStyle) -> String {
     let expression = style == .memory || style == .fugue
         ? " memory=\(String(format: "%.2f", plan.expression.memory)) tension=\(String(format: "%.2f", plan.expression.tension)) resonance=\(String(format: "%.2f", plan.expression.resonance))"
         : ""
-    return "\(style.rawValue) bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)\(expression)"
+    let development = plan.developmentStage.map { " development=\($0.rawValue)" } ?? ""
+    return "\(style.rawValue) bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held)\(development) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)\(expression)"
 }
 
 private let jevTraceLock = NSLock()
@@ -540,6 +541,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var lastPublishedBeat: Int?
     private var lastChord: String?
     private var lastDecisionSource: String?
+    private var lastDevelopmentStage: String?
     private var lastNote: String?
     private var lastExpression: EnsembleExpression = .quiet
     private var humanVolume: UInt8
@@ -788,6 +790,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             print(format(plan, style: options.style))
             lastChord = plan.chord?.displayName
             lastDecisionSource = plan.decisionSource.rawValue
+            lastDevelopmentStage = plan.developmentStage?.rawValue
             lastExpression = plan.expression
             try output.schedule(
                 plan.phrase.messages,
@@ -838,6 +841,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 chord: barIndex.flatMap { progressionChord(for: $0)?.displayName } ?? lastChord,
                 nextChord: barIndex.flatMap { progressionChord(for: $0 + 1)?.displayName },
                 decisionSource: lastDecisionSource,
+                developmentStage: lastDevelopmentStage,
                 lastNote: lastNote,
                 humanChannel: options.inputChannel,
                 companionChannel: options.outputChannel,

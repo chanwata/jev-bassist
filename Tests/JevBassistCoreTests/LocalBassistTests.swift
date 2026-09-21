@@ -452,6 +452,96 @@ final class LocalBassistTests: XCTestCase {
         )
     }
 
+    func testFugueReturnRestatesTheCompleteSubjectEvenAfterRestDecision() throws {
+        let result = FuguePhraseGenerator(outputChannel: 2).generate(
+            decision: BassDecision(
+                activity: .rest,
+                relationship: .contrast,
+                motion: .leap,
+                fill: true,
+                confidence: 1
+            ),
+            chord: ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1),
+            nextChord: ChordCandidate(rootPitchClass: 7, quality: .major, confidence: 1),
+            barIndex: 11,
+            startMicroseconds: 0,
+            musicalStateConfiguration: try MusicalStateConfiguration(),
+            memory: HumanPhraseMemory(
+                notes: [
+                    HumanPhraseNote(note: 60, velocity: 88, positionBeats: 0),
+                    HumanPhraseNote(note: 62, velocity: 84, positionBeats: 0.5),
+                    HumanPhraseNote(note: 65, velocity: 82, positionBeats: 1),
+                    HumanPhraseNote(note: 64, velocity: 78, positionBeats: 1.5)
+                ],
+                ageBars: 9
+            ),
+            previousNotes: [],
+            humanAverageVelocity: 82,
+            stage: .returnOfSubject
+        )
+
+        let noteOns = result.phrase.messages.filter { $0.kind == .noteOn }
+        XCTAssertEqual(noteOns.map(\.note), [60, 62, 65, 64])
+        XCTAssertEqual(noteOns.map(\.offsetMicroseconds), [125_000, 375_000, 625_000, 875_000])
+        XCTAssertEqual(result.expression.memory, 0.87, accuracy: 0.000_001)
+    }
+
+    func testFugueEngineDevelopsOneSubjectAcrossEightBarsThenAdoptsPendingSubject() throws {
+        let decision = BassDecision(
+            activity: .normal,
+            relationship: .follow,
+            motion: .root,
+            fill: false,
+            confidence: 1
+        )
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4),
+                introBars: 0,
+                outputChannel: 2,
+                progression: try ChordProgressionParser.parse("Cmaj7"),
+                style: .fugue
+            ),
+            decisionProvider: ConstantDecisionProvider(decision: decision)
+        )
+        for (offset, note) in [(UInt64(0), UInt8(60)), (250_000, 62), (500_000, 64)] {
+            _ = try engine.ingest(SessionMIDIEvent(
+                offsetMicroseconds: offset,
+                hostTime: offset,
+                channel: 1,
+                kind: .noteOn,
+                note: note,
+                velocity: 84
+            ))
+        }
+        var plans = try engine.advance(through: 2_000_000).plans
+        for (offset, note) in [(UInt64(2_100_000), UInt8(65)), (2_350_000, 68), (2_600_000, 72)] {
+            _ = try engine.ingest(SessionMIDIEvent(
+                offsetMicroseconds: offset,
+                hostTime: offset,
+                channel: 1,
+                kind: .noteOn,
+                note: note,
+                velocity: 82
+            ))
+        }
+        for boundary in 2...9 {
+            plans += try engine.advance(through: UInt64(boundary) * 2_000_000).plans
+        }
+
+        XCTAssertEqual(
+            plans.map(\.developmentStage),
+            [
+                .answer, .sequence, .inversion, .fragmentation,
+                .augmentation, .diminution, .stretto, .returnOfSubject, .answer
+            ]
+        )
+        let returned = plans[7].phrase.messages.filter { $0.kind == .noteOn && $0.note >= 55 }
+        let adopted = plans[8].phrase.messages.filter { $0.kind == .noteOn && $0.note >= 55 }
+        XCTAssertEqual(returned.map(\.note), [60, 62, 64])
+        XCTAssertEqual(adopted.map(\.note), [67, 70, 74])
+    }
+
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {
         let phrase = BassPhraseGenerator(outputChannel: 3).generate(
             decision: BassDecision(
@@ -747,5 +837,17 @@ private final class ImmediatePreparedProvider: BassDecisionProvider, @unchecked 
             ),
             source: .jev
         )
+    }
+}
+
+private struct ConstantDecisionProvider: BassDecisionProvider {
+    let decisionValue: BassDecision
+
+    init(decision: BassDecision) {
+        decisionValue = decision
+    }
+
+    func decision(for input: BassDecisionInput) -> BassDecision {
+        decisionValue
     }
 }

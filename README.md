@@ -9,7 +9,7 @@ The project deliberately separates two jobs:
 
 Network latency must never sit in the note-timing path.
 
-## Current milestone: imitative ensemble
+## Current milestone: motif development ensemble
 
 The CLI completes its audible loop with either local rules or a pipelined Jev decision provider. It can:
 
@@ -28,7 +28,7 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
 - render the same bounded decisions as one quiet, sustained ambient voicing per bar;
 - remember a human motif and return a delayed, locally transformed trace that fades over two silent bars;
-- answer a short human subject on the dominant with optional contrary-motion counterpoint;
+- preserve a short human subject through an eight-bar arc of answer, transformation, climax, and return;
 - mix the human and companion parts independently with MIDI Channel Volume controls;
 - render both MIDI performances as one strongly reactive, beat-synchronized membrane;
 - flush pending output and silence the selected channel when a live session stops.
@@ -174,7 +174,7 @@ Activity selects one, three, or four representative notes rather than adding a g
 
 ## Use the fugue ensemble style
 
-`--style fugue` treats the most recent three-to-six-note idea as a compact subject. The companion answers on the dominant and, when there is enough space, adds a quieter lower voice in contrary motion. It is Baroque-inspired call and response rather than a literal reconstruction of a Bach score: the goal is recognizable imitation, independent motion, and a clear cadence while preserving live-session timing.
+`--style fugue` treats the first qualifying three-to-eight-note idea as a subject and keeps it intact for a complete eight-bar development cycle. Material played during that cycle becomes a candidate for the next cycle instead of erasing the active subject. The companion therefore develops one recognizable idea over time rather than replacing it every bar.
 
 ```bash
 swift run jev-bassist jam \
@@ -192,7 +192,9 @@ swift run jev-bassist jam \
   --ui
 ```
 
-Play a concise subject, then leave roughly a beat of room for the answer. `activity` chooses how much of the subject is stated and whether a countersubject is added. `relationship` chooses the entry and rhythmic treatment: recognizable timing, diminution, or augmentation. `motion` preserves, compresses, inverts, or expands the contour; `fill` may cadence the final note toward the next chord. A short pluck, organ, harpsichord-like patch, or restrained strings will keep the two lines clearer than a long pad.
+Play a concise subject, then leave roughly a beat of room for the first answer. The deterministic form moves through `answer`, `sequence`, `inversion`, `fragmentation`, `augmentation`, `diminution`, `stretto`, and `return`. The final bar restates the complete original contour even when the bounded Jev activity decision requests rest. Jev still controls density, temporal attitude, secondary motion, and cadence inside each formal stage; it cannot discard the subject or select individual notes.
+
+During the cycle, keep playing naturally. A new bar containing at least three notes is remembered as a possible next subject, and the most recent candidate takes over only after the current subject has returned. A short pluck, organ, harpsichord-like patch, or restrained strings will keep overlapping entries clearer than a long pad. The terminal log and browser header show the current development stage.
 
 `--human-volume` and `--companion-volume` accept MIDI values from 0 to 127 and default to 100 and 72. They send Channel Volume (CC7) to the input and output part channels, so the parts must use different MIDI channels for independent control. If both channel options are the same, the two GUI controls are linked because one MIDI part cannot have two CC7 values.
 

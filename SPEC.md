@@ -33,7 +33,7 @@ Jev is a decision maker, not a note generator. Its future typed output should re
 
 The exact schema will be fixed only after a rule-based bassist can already complete a live session.
 
-The local renderer may interpret those axes as a bass pocket, an ambient ensemble response, a transformed memory of the human's recent motif, or a compact imitative counterpoint response. Memory responses preserve recognizable contour and relative timing, enter only after a deliberate breath, and decay to silence when the player stops supplying new material. Fugue responses state a bounded subject on the dominant and may add one lower contrary-motion voice; Jev still never chooses individual notes.
+The local renderer may interpret those axes as a bass pocket, an ambient ensemble response, a transformed memory of the human's recent motif, or an eight-bar imitative development. Memory responses preserve recognizable contour and relative timing, enter only after a deliberate breath, and decay to silence when the player stops supplying new material. Fugue responses lock one qualifying subject for a complete answer-to-return cycle; later human material waits as a candidate for the next cycle. Jev still never chooses individual notes.
 
 ## Architecture
 
@@ -120,7 +120,7 @@ The primary human evaluation is a short rating of “this felt like another play
 - report timing and decision stability;
 - conduct live A/B sessions focused on perceived responsiveness.
 
-### M6–M9: Ambient, mix, memory, and imitative ensemble
+### M6–M10: Ambient, mix, memory, and motif development ensemble
 
 - render sparse sustained ambient voicings from the same bounded decisions;
 - expose independent human and companion channel volume controls;
@@ -129,6 +129,8 @@ The primary human evaluation is a short rating of “this felt like another play
 - drive one persistent membrane visual from those values and the authoritative MIDI timeline.
 - render a recent human subject as a deterministic dominant answer with optional two-voice counterpoint;
 - amplify membrane displacement and mirror imitative answers so live musical changes are visually legible.
+- preserve subject identity across an eight-bar development arc ending in an explicit return;
+- queue new human material for the next cycle rather than replacing the active subject mid-development.
 
 ## Out of scope for the early MVP
 

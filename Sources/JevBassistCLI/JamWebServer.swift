@@ -27,6 +27,7 @@ struct JamWebState: Codable, Sendable {
     let chord: String?
     let nextChord: String?
     let decisionSource: String?
+    let developmentStage: String?
     let lastNote: String?
     let humanChannel: UInt8
     let companionChannel: UInt8
