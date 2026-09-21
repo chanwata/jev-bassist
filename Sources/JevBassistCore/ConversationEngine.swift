@@ -5,6 +5,36 @@ public enum ConversationRelationship: String, Codable, Equatable, Sendable {
     case echo
     case tailVariation
     case hold
+    case sequence
+    case inversion
+    case fragmentation
+    case augmentation
+    case originalReturn
+}
+
+public struct ConversationLineage: Codable, Equatable, Sendable {
+    public let originMotifID: UInt64
+    public let sourceMotifID: UInt64
+    public let responseID: UInt64
+    public let parentResponseID: UInt64?
+    public let generation: Int
+    public let relationship: ConversationRelationship
+
+    public init(
+        originMotifID: UInt64,
+        sourceMotifID: UInt64,
+        responseID: UInt64,
+        parentResponseID: UInt64?,
+        generation: Int,
+        relationship: ConversationRelationship
+    ) {
+        self.originMotifID = originMotifID
+        self.sourceMotifID = sourceMotifID
+        self.responseID = responseID
+        self.parentResponseID = parentResponseID
+        self.generation = generation
+        self.relationship = relationship
+    }
 }
 
 public struct ConversationResponseNote: Codable, Equatable, Sendable {
@@ -192,6 +222,65 @@ public struct ResponseCandidateGenerator: Sendable {
         ]
     }
 
+    public func developmentCandidates(
+        origin: Motif,
+        current: Motif,
+        pitchContext: ModalPitchContext
+    ) -> [ConversationResponseCandidate] {
+        var result = candidates(for: current, pitchContext: pitchContext)
+        let source = Array(origin.notes.prefix(6))
+        guard source.count >= 2 else { return result }
+        let originStart = Int(source[0].note)
+        let currentStart = Int(current.notes.first?.note ?? source[0].note)
+        let transposition = max(-7, min(7, currentStart - originStart))
+
+        let sequence = source.map {
+            responseNote(
+                from: $0,
+                pitch: pitchContext.conservativeProjection(
+                    UInt8(max(0, min(127, Int($0.note) + transposition)))
+                )
+            )
+        }
+        let inversion = source.map {
+            responseNote(
+                from: $0,
+                pitch: pitchContext.conservativeProjection(
+                    UInt8(max(0, min(127, originStart - (Int($0.note) - originStart))))
+                )
+            )
+        }
+        let fragmentSource = source.enumerated().filter { index, note in
+            index == 0
+                || origin.features.accentedNoteIndices.contains(index)
+                || origin.features.characteristicIntervalIndices.contains(max(0, index - 1))
+                || note.restBeforeBeats >= 0.25
+        }.prefix(3)
+        let fragment = fragmentSource.map { _, note in
+            responseNote(from: note, pitch: pitchContext.conservativeProjection(note.note))
+        }
+        let augmentation = source.map {
+            ConversationResponseNote(
+                note: pitchContext.conservativeProjection($0.note),
+                velocity: softenedVelocity($0.velocity),
+                relativeOnsetBeats: $0.relativeOnsetBeats * 1.5,
+                durationBeats: max(0.12, $0.durationBeats * 1.35)
+            )
+        }
+        let original = source.map {
+            responseNote(from: $0, pitch: pitchContext.conservativeProjection($0.note))
+        }
+
+        result += [
+            developmentCandidate("sequence", .sequence, sequence, recognition: 0.78),
+            developmentCandidate("inversion", .inversion, inversion, recognition: 0.7),
+            developmentCandidate("fragment", .fragmentation, fragment, recognition: 0.68),
+            developmentCandidate("augment", .augmentation, augmentation, recognition: 0.76),
+            developmentCandidate("return", .originalReturn, original, recognition: 1)
+        ]
+        return result
+    }
+
     private func restCandidate(confidence: Double) -> ConversationResponseCandidate {
         ConversationResponseCandidate(
             id: "rest",
@@ -208,6 +297,34 @@ public struct ResponseCandidateGenerator: Sendable {
 
     private func softenedVelocity(_ velocity: UInt8) -> UInt8 {
         UInt8(min(92, max(28, (Double(velocity) * 0.72).rounded())))
+    }
+
+    private func responseNote(from note: MotifNote, pitch: UInt8) -> ConversationResponseNote {
+        ConversationResponseNote(
+            note: pitch,
+            velocity: softenedVelocity(note.velocity),
+            relativeOnsetBeats: note.relativeOnsetBeats,
+            durationBeats: max(0.08, note.durationBeats)
+        )
+    }
+
+    private func developmentCandidate(
+        _ id: String,
+        _ relationship: ConversationRelationship,
+        _ notes: [ConversationResponseNote],
+        recognition: Double
+    ) -> ConversationResponseCandidate {
+        ConversationResponseCandidate(
+            id: id,
+            relationship: relationship,
+            notes: notes,
+            score: ConversationScore(
+                recognition: recognition,
+                space: relationship == .augmentation ? 0.72 : 0.76,
+                voiceLeading: voiceLeading(notes),
+                modalFit: 1
+            )
+        )
     }
 
     private func voiceLeading(_ notes: [ConversationResponseNote]) -> Double {
@@ -233,6 +350,40 @@ public struct ResponseArbiter: Sendable {
             return $0.id > $1.id
         }
     }
+
+    public func choose(
+        from candidates: [ConversationResponseCandidate],
+        context: ConversationDevelopmentContext
+    ) -> ConversationResponseCandidate? {
+        if context.generation == 0 {
+            return candidates.first { $0.relationship == .echo } ?? choose(from: candidates)
+        }
+        if context.accumulatedDivergence >= 1.35 {
+            return candidates.first { $0.relationship == .originalReturn }
+        }
+        let preferred: ConversationRelationship
+        if context.notesPerBeat >= 2.2 {
+            preferred = .augmentation
+        } else if context.registerShift >= 3 {
+            preferred = .sequence
+        } else if context.originSimilarity >= 0.78 {
+            preferred = .inversion
+        } else if context.originDurationBeats >= 2.5 {
+            preferred = .fragmentation
+        } else {
+            preferred = .tailVariation
+        }
+        return candidates.first { $0.relationship == preferred } ?? choose(from: candidates)
+    }
+}
+
+public struct ConversationDevelopmentContext: Equatable, Sendable {
+    public let generation: Int
+    public let accumulatedDivergence: Double
+    public let originSimilarity: Double
+    public let notesPerBeat: Double
+    public let registerShift: Int
+    public let originDurationBeats: Double
 }
 
 public struct ConversationEngine: Sendable {
@@ -242,6 +393,11 @@ public struct ConversationEngine: Sendable {
 
     private let generator = ResponseCandidateGenerator()
     private let arbiter = ResponseArbiter()
+    private var originMotif: Motif?
+    private var generation = 0
+    private var accumulatedDivergence = 0.0
+    private var nextResponseID: UInt64 = 1
+    private var previousResponseID: UInt64?
 
     public init(
         musicalStateConfiguration: MusicalStateConfiguration,
@@ -253,21 +409,56 @@ public struct ConversationEngine: Sendable {
         self.outputChannel = outputChannel
     }
 
-    public func plan(for motif: Motif) -> BassBarPlan? {
-        let legacy = motif.legacyMemory()
+    public mutating func plan(
+        for motif: Motif,
+        availableAtMicroseconds: UInt64? = nil
+    ) -> BassBarPlan? {
+        if originMotif == nil {
+            originMotif = motif
+        }
+        guard let originMotif else { return nil }
+        let legacy = originMotif.legacyMemory()
         guard let center = ModalHarmonyPlanner(mode: mode).inferTonalCenter(from: legacy.notes) else {
             return nil
         }
         let context = ModalPitchContext(mode: mode, tonalCenterPitchClass: center)
-        let candidates = generator.candidates(for: motif, pitchContext: context)
-        guard let selected = arbiter.choose(from: candidates) else { return nil }
+        let developmentContext = contextFor(origin: originMotif, current: motif)
+        let candidates = generator.developmentCandidates(
+            origin: originMotif,
+            current: motif,
+            pitchContext: context
+        )
+        guard let selected = arbiter.choose(from: candidates, context: developmentContext) else {
+            return nil
+        }
         let beatMicroseconds = 60_000_000 / musicalStateConfiguration.tempoBPM
-        let start = nextBeat(after: motif.finalizedAtMicroseconds, beat: beatMicroseconds)
+        let availableAt = max(
+            motif.finalizedAtMicroseconds,
+            availableAtMicroseconds ?? motif.finalizedAtMicroseconds
+        )
+        let start = nextBeat(after: availableAt, beat: beatMicroseconds)
         let phrase = render(selected, startMicroseconds: start, beatMicroseconds: beatMicroseconds)
         let barLength = musicalStateConfiguration.boundaryMicroseconds(
             afterBeats: musicalStateConfiguration.beatsPerBar
         )
         let decision = decision(for: selected.relationship)
+        let responseID = nextResponseID
+        let lineage = ConversationLineage(
+            originMotifID: originMotif.id,
+            sourceMotifID: motif.id,
+            responseID: responseID,
+            parentResponseID: previousResponseID,
+            generation: generation,
+            relationship: selected.relationship
+        )
+        nextResponseID += 1
+        previousResponseID = responseID
+        generation += 1
+        if selected.relationship == .originalReturn {
+            accumulatedDivergence = 0
+        } else {
+            accumulatedDivergence += divergence(for: selected.relationship)
+        }
         return BassBarPlan(
             sourceBarIndex: Int(motif.finalizedAtMicroseconds / barLength),
             targetBarIndex: Int(start / barLength),
@@ -277,9 +468,44 @@ public struct ConversationEngine: Sendable {
             decisionSource: .rules,
             developmentStage: nil,
             tonalCenterPitchClass: center,
+            conversationLineage: lineage,
             phrase: phrase,
             expression: expression(for: selected)
         )
+    }
+
+    private func contextFor(origin: Motif, current: Motif) -> ConversationDevelopmentContext {
+        let originSigns = origin.features.pitchIntervals.map { $0.signum() }
+        let currentSigns = current.features.pitchIntervals.map { $0.signum() }
+        let comparisons = min(originSigns.count, currentSigns.count)
+        let matches = zip(originSigns.prefix(comparisons), currentSigns.prefix(comparisons))
+            .filter { left, right in left == right }.count
+        let similarity = comparisons == 0 ? 0 : Double(matches) / Double(comparisons)
+        let notesPerBeat = Double(current.notes.count) / max(0.25, current.durationBeats)
+        let registerShift = abs(
+            Int(current.notes.first?.note ?? 60) - Int(origin.notes.first?.note ?? 60)
+        )
+        return ConversationDevelopmentContext(
+            generation: generation,
+            accumulatedDivergence: accumulatedDivergence,
+            originSimilarity: similarity,
+            notesPerBeat: notesPerBeat,
+            registerShift: registerShift,
+            originDurationBeats: origin.durationBeats
+        )
+    }
+
+    private func divergence(for relationship: ConversationRelationship) -> Double {
+        switch relationship {
+        case .rest, .hold: return 0.15
+        case .echo: return 0.2
+        case .tailVariation: return 0.35
+        case .sequence: return 0.55
+        case .fragmentation: return 0.6
+        case .augmentation: return 0.65
+        case .inversion: return 0.8
+        case .originalReturn: return 0
+        }
     }
 
     private func render(
@@ -355,6 +581,16 @@ public struct ConversationEngine: Sendable {
             return BassDecision(activity: .normal, relationship: .contrast, motion: .step, fill: false, confidence: 0.82)
         case .hold:
             return BassDecision(activity: .sparse, relationship: .hold, motion: .root, fill: false, confidence: 0.78)
+        case .sequence:
+            return BassDecision(activity: .normal, relationship: .follow, motion: .step, fill: false, confidence: 0.82)
+        case .inversion:
+            return BassDecision(activity: .normal, relationship: .contrast, motion: .leap, fill: false, confidence: 0.78)
+        case .fragmentation:
+            return BassDecision(activity: .sparse, relationship: .contrast, motion: .step, fill: false, confidence: 0.76)
+        case .augmentation:
+            return BassDecision(activity: .sparse, relationship: .follow, motion: .step, fill: false, confidence: 0.8)
+        case .originalReturn:
+            return BassDecision(activity: .normal, relationship: .follow, motion: .root, fill: false, confidence: 0.94)
         }
     }
 

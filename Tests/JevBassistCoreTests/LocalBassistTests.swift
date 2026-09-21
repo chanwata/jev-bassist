@@ -584,7 +584,7 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(firstUpdate.plans.count, 1)
         XCTAssertEqual(firstPlan.developmentStage, nil)
         XCTAssertEqual(firstPlan.tonalCenterPitchClass, 0)
-        XCTAssertEqual(firstPlan.phrase.startMicroseconds, 1_000_000)
+        XCTAssertEqual(firstPlan.phrase.startMicroseconds, 2_500_000)
         XCTAssertEqual(firstNoteOns.map(\.note), [60, 62, 64])
         XCTAssertEqual(firstNoteOns.count, firstNoteOffs.count)
         XCTAssertLessThan(firstNoteOffs[0].offsetMicroseconds, firstNoteOns[1].offsetMicroseconds)

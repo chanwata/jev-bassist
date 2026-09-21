@@ -172,6 +172,15 @@ The primary human evaluation is a short rating of “this felt like another play
 - render one companion voice with paired releases and no overlapping machine attacks;
 - retain the legacy fugue generator as directly testable comparison code, not a hidden live fallback.
 
+### M12 P4: contextual development and return
+
+- retain the first accepted motif as an immutable origin while later human motifs shape the response context;
+- choose sequence, inversion, fragmentation, or augmentation from observed density, contour similarity, duration, and register movement rather than a fixed stage order;
+- accumulate a bounded divergence measure and return to the unchanged origin when transformations have moved sufficiently far away;
+- attach origin, source motif, parent response, generation, and relationship lineage to every conversation plan;
+- quantize from the time a completed motif actually becomes available, never from an earlier inferred boundary that would schedule attacks in the past;
+- keep generated notes modal while never rewriting the captured human motif.
+
 ## Out of scope for the early MVP
 
 - audio transcription;
