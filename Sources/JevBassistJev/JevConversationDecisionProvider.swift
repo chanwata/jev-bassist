@@ -255,14 +255,14 @@ public final class JevConversationDecisionProvider: ConversationDecisionProvider
                 traceHandler(evaluation.trace)
                 return
             }
-            self.lock.lock()
-            self.tasks.removeValue(forKey: input.revision)
-            if !self.isCancelled,
-               input.revision > self.expiredThroughRevision,
-               let candidateID = evaluation.candidateID {
-                self.prepared[input.revision] = candidateID
+            self.lock.withLock {
+                self.tasks.removeValue(forKey: input.revision)
+                if !self.isCancelled,
+                   input.revision > self.expiredThroughRevision,
+                   let candidateID = evaluation.candidateID {
+                    self.prepared[input.revision] = candidateID
+                }
             }
-            self.lock.unlock()
             traceHandler(evaluation.trace)
         }
         lock.lock()
