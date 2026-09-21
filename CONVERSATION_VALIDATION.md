@@ -14,6 +14,8 @@ swift test --sanitize=address
 
 CI also extracts the browser program and runs `node --check` before the Swift tests.
 
+Latest automated result: GitHub Actions CI #64 passed on 2026-09-21—build, browser JavaScript syntax, 99 Swift tests, and the AddressSanitizer test run all succeeded.
+
 | Scenario group | Automated evidence |
 | --- | --- |
 | Response matching | `ConversationObservationTests` compares contour/rhythm evidence, distinguishes preceding responses with the same ending, and accepts octave-transposed imitation. |
