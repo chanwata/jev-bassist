@@ -281,7 +281,14 @@ public struct LocalBassistSessionEvaluator: Sendable {
         let finalUpdate = try engine.finish(through: fixture.durationMicroseconds)
         collect(finalUpdate)
         schedule(finalUpdate.plans, at: fixture.durationMicroseconds)
-        try commit(through: fixture.durationMicroseconds)
+        let plannedEnd = finalUpdate.plans
+            .flatMap(\.phrase.messages)
+            .map(\.offsetMicroseconds)
+            .max() ?? fixture.durationMicroseconds
+        // Evaluation is an offline comparison artifact, so retain the complete
+        // locally scheduled answer even when the input fixture ends just before
+        // that answer's onset. Live stop behavior still cancels pending output.
+        try commit(through: max(fixture.durationMicroseconds, plannedEnd))
 
         return try SessionEvaluationTrace(
             input: fixture,

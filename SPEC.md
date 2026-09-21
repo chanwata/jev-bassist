@@ -205,11 +205,24 @@ The primary human evaluation is a short rating of “this felt like another play
 - retain the opening, salient interior events, and ending when a long motif must be bounded;
 - score the rendered notes for recognition, contour, modal fit, voice leading, cadence, continuity, and space;
 - shape velocity and articulation as a phrase while preserving relative rhythm and characteristic accents;
-- advance response continuity and divergence only after a Note On crosses the rolling commitment horizon;
+- advance response continuity and divergence only after a scheduled Note On's onset time has elapsed;
 - include bounded pitches, intervals, timing, landing, and continuity features in Jev candidate descriptions while keeping note generation local;
 - carry origin, current source, and response gestures with lineage and reveal only the committed response prefix in the browser;
 - replace relationship polygons with layered curve trajectories whose spacing, direction, gaps, scale, and convergence reflect the audible transformation;
 - allow an explicit browser audio-input selection for optional local energy and brightness analysis without treating the default microphone as the session mix.
+
+### M12 P8: reciprocal ensemble state
+
+- compare each completed human phrase with the audible prefix of the preceding companion response, the preceding human phrase, the shared theme, and the immutable origin;
+- classify bounded evidence for imitation, rhythmic reply, continuation, self-repetition, a new proposal, or ambiguity without treating one shared ending as proof;
+- keep an immutable origin and a separately revisable shared theme, requiring repeated or sufficiently strong evidence before replacing the theme;
+- choose an explicit intent—acknowledge, continue, question, support, settle, or wait—before selecting a locally safe response;
+- permit at most one short autonomous continuation after a reply, then wait instead of allowing a machine-only chain;
+- reserve a half-beat response opportunity and derive the Jev deadline from it; a timeout uses the local candidate at the same onset;
+- preserve already elapsed response notes when a later phrase replaces an unsent suffix, including paired releases already handed to CoreMIDI;
+- send Jev bounded conversation state and candidate IDs while retaining pitch, rhythm, mode, register, timing, and MIDI safety locally;
+- write scheduler events and cancellations to evaluation trace v3 while continuing to decode v1 and v2 without inventing absent history;
+- map browser events from Swift session offsets to `performance.now()`, keep stable note/source IDs, coalesce slow SSE clients, and draw recorded note correspondence rather than array-position links.
 
 ## Out of scope for the early MVP
 
