@@ -29,6 +29,23 @@ public struct HumanPhraseMemory: Codable, Equatable, Sendable {
     }
 }
 
+public enum MotifDevelopmentStage: String, Codable, CaseIterable, Equatable, Sendable {
+    case answer
+    case sequence
+    case inversion
+    case fragmentation
+    case augmentation
+    case diminution
+    case stretto
+    case returnOfSubject = "return"
+
+    public static func stage(at cyclePosition: Int) -> MotifDevelopmentStage {
+        let stages = MotifDevelopmentStage.allCases
+        let normalized = (cyclePosition % stages.count + stages.count) % stages.count
+        return stages[normalized]
+    }
+}
+
 public struct EnsembleExpression: Codable, Equatable, Sendable {
     public let memory: Double
     public let tension: Double
@@ -99,6 +116,7 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
     public let chord: ChordCandidate?
     public let nextChord: ChordCandidate?
     public let style: AccompanimentStyle
+    public let developmentStage: MotifDevelopmentStage?
     public let isHeldChord: Bool
     public let targetBarIndex: Int
 
@@ -107,6 +125,7 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         chord: ChordCandidate?,
         nextChord: ChordCandidate? = nil,
         style: AccompanimentStyle = .bass,
+        developmentStage: MotifDevelopmentStage? = nil,
         isHeldChord: Bool,
         targetBarIndex: Int
     ) {
@@ -114,6 +133,7 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         self.chord = chord
         self.nextChord = nextChord
         self.style = style
+        self.developmentStage = developmentStage
         self.isHeldChord = isHeldChord
         self.targetBarIndex = targetBarIndex
     }
@@ -123,6 +143,7 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         case chord
         case nextChord
         case style
+        case developmentStage
         case isHeldChord
         case targetBarIndex
     }
@@ -133,6 +154,10 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         chord = try container.decodeIfPresent(ChordCandidate.self, forKey: .chord)
         nextChord = try container.decodeIfPresent(ChordCandidate.self, forKey: .nextChord)
         style = try container.decodeIfPresent(AccompanimentStyle.self, forKey: .style) ?? .bass
+        developmentStage = try container.decodeIfPresent(
+            MotifDevelopmentStage.self,
+            forKey: .developmentStage
+        )
         isHeldChord = try container.decode(Bool.self, forKey: .isHeldChord)
         targetBarIndex = try container.decode(Int.self, forKey: .targetBarIndex)
     }
@@ -1077,9 +1102,9 @@ public struct MemoryPhraseGenerator: Sendable {
     }
 }
 
-/// Builds a compact imitative texture from the human's recent motif. The upper
-/// voice states a tonal answer while a quieter lower voice moves in contrary
-/// motion. All selection, transformation, and scheduling remain deterministic.
+/// Develops one locked human subject across an eight-bar imitative form. New
+/// material cannot replace the subject until its explicit return. All concrete
+/// note selection, transformation, and scheduling remain deterministic.
 public struct FuguePhraseGenerator: Sendable {
     public let outputChannel: UInt8
 
@@ -1097,7 +1122,8 @@ public struct FuguePhraseGenerator: Sendable {
         musicalStateConfiguration: MusicalStateConfiguration,
         memory: HumanPhraseMemory?,
         previousNotes: [UInt8],
-        humanAverageVelocity: Double?
+        humanAverageVelocity: Double?,
+        stage: MotifDevelopmentStage = .answer
     ) -> MemoryPhraseResult {
         let barLength = musicalStateConfiguration.boundaryMicroseconds(
             afterBeats: musicalStateConfiguration.beatsPerBar
@@ -1109,27 +1135,33 @@ public struct FuguePhraseGenerator: Sendable {
             endMicroseconds: endMicroseconds,
             messages: []
         )
-        guard decision.activity != .rest,
+        guard decision.activity != .rest || stage == .returnOfSubject,
               let memory,
-              !memory.notes.isEmpty,
-              memory.ageBars <= 2 else {
+              !memory.notes.isEmpty else {
             return MemoryPhraseResult(phrase: empty, expression: .quiet)
         }
 
-        let subject = selectedSubject(from: memory.notes, activity: decision.activity)
+        let subject = selectedSubject(
+            from: memory.notes,
+            activity: decision.activity,
+            stage: stage,
+            barIndex: barIndex
+        )
         let rhythm = subjectRhythm(
             subject,
             relationship: decision.relationship,
+            stage: stage,
             beatsPerBar: Double(musicalStateConfiguration.beatsPerBar)
         )
         let subjectNotes = tonalAnswer(
             subject,
             motion: decision.motion,
             chord: chord,
-            previousNotes: previousNotes
+            previousNotes: previousNotes,
+            stage: stage
         )
         var finalSubjectNotes = subjectNotes
-        if decision.fill,
+        if decision.fill && stage != .returnOfSubject,
            let cadence = cadenceNote(
                chord: nextChord ?? chord,
                near: Int(subjectNotes.last ?? 67)
@@ -1140,7 +1172,9 @@ public struct FuguePhraseGenerator: Sendable {
         let counterNotes = countersubject(
             subject: subject,
             chord: chord,
-            include: decision.activity == .normal || decision.activity == .busy
+            include: (decision.activity == .normal || decision.activity == .busy)
+                && stage != .fragmentation
+                && stage != .returnOfSubject
         )
         let beatLength = 60_000_000 / musicalStateConfiguration.tempoBPM
         var messages: [ScheduledMIDIMessage] = []
@@ -1152,7 +1186,7 @@ public struct FuguePhraseGenerator: Sendable {
             startMicroseconds: startMicroseconds,
             endMicroseconds: endMicroseconds,
             baseVelocity: voiceVelocity(humanAverageVelocity: humanAverageVelocity, ageBars: memory.ageBars),
-            durationRatio: decision.relationship == .hold ? 0.92 : 0.76,
+            durationRatio: durationRatio(stage: stage, relationship: decision.relationship),
             messages: &messages
         )
         if !counterNotes.isEmpty {
@@ -1168,6 +1202,26 @@ public struct FuguePhraseGenerator: Sendable {
                     ageBars: memory.ageBars
                 ) - 9),
                 durationRatio: 1.28,
+                messages: &messages
+            )
+        }
+        if stage == .stretto, subject.count >= 3 {
+            let entryNotes = strettoAnswer(subjectNotes, chord: chord)
+            let entryPositions = rhythm.map { min(
+                Double(musicalStateConfiguration.beatsPerBar) - 0.2,
+                $0 + 0.75
+            ) }
+            appendVoice(
+                notes: entryNotes,
+                positions: entryPositions,
+                beatLength: beatLength,
+                startMicroseconds: startMicroseconds,
+                endMicroseconds: endMicroseconds,
+                baseVelocity: max(20, voiceVelocity(
+                    humanAverageVelocity: humanAverageVelocity,
+                    ageBars: 0
+                ) - 12),
+                durationRatio: 0.62,
                 messages: &messages
             )
         }
@@ -1187,7 +1241,7 @@ public struct FuguePhraseGenerator: Sendable {
             endMicroseconds: endMicroseconds,
             messages: messages
         )
-        let ageStrength = max(0, 1 - Double(memory.ageBars) * 0.28)
+        let ageStrength: Double = stage == .returnOfSubject ? 1 : 0.94
         let voiceActivity = min(1, Double(finalSubjectNotes.count + counterNotes.count) / 8)
         let intervalTension = contrapuntalTension(
             subject: finalSubjectNotes,
@@ -1197,18 +1251,29 @@ public struct FuguePhraseGenerator: Sendable {
             phrase: phrase,
             expression: EnsembleExpression(
                 memory: ageStrength * min(1, 0.55 + Double(subject.count) * 0.08),
-                tension: intervalTension,
+                tension: stageTension(stage, intervalTension: intervalTension),
                 activity: 0.35 + voiceActivity * 0.65,
-                resonance: decision.relationship == .hold ? 0.68 : 0.46
+                resonance: stage == .augmentation || decision.relationship == .hold ? 0.72 : 0.46
             )
         )
     }
 
     private func selectedSubject(
         from notes: [HumanPhraseNote],
-        activity: BassActivity
+        activity: BassActivity,
+        stage: MotifDevelopmentStage,
+        barIndex: Int
     ) -> [HumanPhraseNote] {
         let ordered = notes.sorted { $0.positionBeats < $1.positionBeats }
+        if stage == .returnOfSubject {
+            return Array(ordered.prefix(6))
+        }
+        if stage == .fragmentation {
+            let fragmentLength = min(3, ordered.count)
+            let possibleStarts = max(1, ordered.count - fragmentLength + 1)
+            let start = abs(barIndex) % possibleStarts
+            return Array(ordered[start..<(start + fragmentLength)])
+        }
         let count: Int
         switch activity {
         case .rest:
@@ -1234,6 +1299,7 @@ public struct FuguePhraseGenerator: Sendable {
     private func subjectRhythm(
         _ subject: [HumanPhraseNote],
         relationship: BassRelationship,
+        stage: MotifDevelopmentStage,
         beatsPerBar: Double
     ) -> [Double] {
         guard let first = subject.first else { return [] }
@@ -1250,8 +1316,20 @@ public struct FuguePhraseGenerator: Sendable {
             onset = 0
             scale = 1.45
         }
+        let stageScale: Double
+        switch stage {
+        case .augmentation:
+            stageScale = 1.65
+        case .diminution, .stretto:
+            stageScale = 0.58
+        default:
+            stageScale = 1
+        }
+        let stageOnset = stage == .returnOfSubject ? 0.25 : onset
+        let effectiveScale = stage == .returnOfSubject ? 1 : scale * stageScale
         return subject.map {
-            let position = onset + ($0.positionBeats - first.positionBeats) * scale
+            let position = stageOnset
+                + ($0.positionBeats - first.positionBeats) * effectiveScale
             return min(beatsPerBar - 0.3, (position * 4).rounded() / 4)
         }
     }
@@ -1260,25 +1338,40 @@ public struct FuguePhraseGenerator: Sendable {
         _ subject: [HumanPhraseNote],
         motion: BassMotion,
         chord: ChordCandidate?,
-        previousNotes: [UInt8]
+        previousNotes: [UInt8],
+        stage: MotifDevelopmentStage
     ) -> [UInt8] {
         guard let first = subject.first else { return [] }
         let tonic = Int(chord?.rootPitchClass ?? (first.note % 12))
-        let answerPitchClass = (tonic + 7) % 12
+        let answerPitchClass: Int
+        switch stage {
+        case .answer, .diminution:
+            answerPitchClass = (tonic + 7) % 12
+        case .sequence:
+            answerPitchClass = (tonic + 2) % 12
+        case .augmentation:
+            answerPitchClass = (tonic + 9) % 12
+        default:
+            answerPitchClass = tonic
+        }
         let reference = Int(previousNotes.last ?? 67)
-        let anchor = nearest(pitchClass: answerPitchClass, to: reference, in: 55...79)
+        let anchor = nearest(pitchClass: answerPitchClass, to: reference, in: 55...67)
         return subject.enumerated().map { index, item in
             let sourceInterval = Int(item.note) - Int(first.note)
+            let stagedInterval = stage == .inversion ? -sourceInterval : sourceInterval
             let interval: Int
+            if stage == .returnOfSubject {
+                return UInt8(fold(anchor + sourceInterval, into: 55...79))
+            }
             switch motion {
             case .root:
-                interval = sourceInterval
+                interval = stagedInterval
             case .step:
-                interval = sourceInterval.signum() * min(abs(sourceInterval), 5)
+                interval = stagedInterval.signum() * min(abs(stagedInterval), 5)
             case .approach:
-                interval = -sourceInterval
+                interval = -stagedInterval
             case .leap:
-                interval = sourceInterval + (index.isMultiple(of: 2) ? 0 : 7)
+                interval = stagedInterval + (index.isMultiple(of: 2) ? 0 : 7)
             }
             return UInt8(fold(anchor + interval, into: 55...79))
         }
@@ -1296,6 +1389,50 @@ public struct FuguePhraseGenerator: Sendable {
             let interval = Int(subject[index].note) - Int(first.note)
             return UInt8(fold(anchor - interval, into: 43...60))
         }
+    }
+
+    private func strettoAnswer(
+        _ notes: [UInt8],
+        chord: ChordCandidate?
+    ) -> [UInt8] {
+        let dominantPitchClass = (Int(chord?.rootPitchClass ?? 0) + 7) % 12
+        let anchor = nearest(pitchClass: dominantPitchClass, to: 55, in: 43...67)
+        guard let first = notes.first else { return [] }
+        return notes.map {
+            UInt8(fold(anchor + Int($0) - Int(first), into: 43...67))
+        }
+    }
+
+    private func durationRatio(
+        stage: MotifDevelopmentStage,
+        relationship: BassRelationship
+    ) -> Double {
+        switch stage {
+        case .augmentation:
+            return 1.18
+        case .diminution, .stretto:
+            return 0.58
+        default:
+            return relationship == .hold ? 0.92 : 0.76
+        }
+    }
+
+    private func stageTension(
+        _ stage: MotifDevelopmentStage,
+        intervalTension: Double
+    ) -> Double {
+        let structural: Double
+        switch stage {
+        case .answer: structural = 0.34
+        case .sequence: structural = 0.48
+        case .inversion: structural = 0.58
+        case .fragmentation: structural = 0.64
+        case .augmentation: structural = 0.46
+        case .diminution: structural = 0.68
+        case .stretto: structural = 0.9
+        case .returnOfSubject: structural = 0.22
+        }
+        return min(1, structural * 0.72 + intervalTension * 0.28)
     }
 
     private func appendVoice(
@@ -1394,6 +1531,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
     public let usedHeldChord: Bool
     public let decision: BassDecision
     public let decisionSource: BassDecisionSource
+    public let developmentStage: MotifDevelopmentStage?
     public let phrase: BassPhrase
     public let expression: EnsembleExpression
 
@@ -1404,6 +1542,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         usedHeldChord: Bool,
         decision: BassDecision,
         decisionSource: BassDecisionSource = .rules,
+        developmentStage: MotifDevelopmentStage? = nil,
         phrase: BassPhrase,
         expression: EnsembleExpression = .quiet
     ) {
@@ -1413,6 +1552,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         self.usedHeldChord = usedHeldChord
         self.decision = decision
         self.decisionSource = decisionSource
+        self.developmentStage = developmentStage
         self.phrase = phrase
         self.expression = expression
     }
@@ -1494,6 +1634,9 @@ public struct LocalBassistEngine: Sendable {
     private var previousPhraseNotes: [UInt8] = []
     private var phraseNotesByBar: [Int: [HumanPhraseNote]] = [:]
     private var recentPhraseMemory: HumanPhraseMemory?
+    private var fugueSubjectMemory: HumanPhraseMemory?
+    private var pendingFugueSubject: HumanPhraseMemory?
+    private var fugueCycleStartBarIndex: Int?
 
     public init(
         configuration: LocalBassistConfiguration,
@@ -1548,6 +1691,12 @@ public struct LocalBassistEngine: Sendable {
 
             let mayHoldChord = barsWithoutChord <= configuration.maximumHeldChordBars
             let targetBarIndex = snapshot.barIndex + 1
+            let fugueDevelopment = configuration.style == .fugue
+                ? updateFugueDevelopment(
+                    candidate: memory,
+                    targetBarIndex: targetBarIndex
+                )
+                : nil
             let liveChord = currentChord ?? (mayHoldChord ? lastChord : nil)
             let plannedChord = progressionChord(for: targetBarIndex)
             let resolvedChord = plannedChord ?? liveChord
@@ -1558,6 +1707,7 @@ public struct LocalBassistEngine: Sendable {
                     chord: resolvedChord,
                     nextChord: progressionChord(for: targetBarIndex + 1),
                     style: configuration.style,
+                    developmentStage: fugueDevelopment?.stage,
                     isHeldChord: usedHeldChord,
                     targetBarIndex: targetBarIndex
                 )
@@ -1609,9 +1759,10 @@ public struct LocalBassistEngine: Sendable {
                         barIndex: targetBarIndex,
                         startMicroseconds: snapshot.endMicroseconds,
                         musicalStateConfiguration: configuration.musicalState,
-                        memory: memory,
+                        memory: fugueDevelopment?.memory,
                         previousNotes: previousPhraseNotes,
-                        humanAverageVelocity: snapshot.state.averageVelocity
+                        humanAverageVelocity: snapshot.state.averageVelocity,
+                        stage: fugueDevelopment?.stage ?? .answer
                     )
                     phrase = result.phrase
                     expression = result.expression
@@ -1632,6 +1783,7 @@ public struct LocalBassistEngine: Sendable {
                         usedHeldChord: usedHeldChord,
                         decision: resolution.decision,
                         decisionSource: resolution.source,
+                        developmentStage: fugueDevelopment?.stage,
                         phrase: phrase,
                         expression: expression
                     )
@@ -1648,6 +1800,7 @@ public struct LocalBassistEngine: Sendable {
                         chord: preparedChord,
                         nextChord: progressionChord(for: preparedTargetBarIndex + 1),
                         style: configuration.style,
+                        developmentStage: fugueStage(for: preparedTargetBarIndex),
                         isHeldChord: preparedPlannedChord == nil
                             && currentChord == nil
                             && preparedChord != nil,
@@ -1701,6 +1854,58 @@ public struct LocalBassistEngine: Sendable {
         )
         self.recentPhraseMemory = aged.ageBars <= 2 ? aged : nil
         return aged.ageBars <= 2 ? aged : nil
+    }
+
+    private mutating func updateFugueDevelopment(
+        candidate: HumanPhraseMemory?,
+        targetBarIndex: Int
+    ) -> (memory: HumanPhraseMemory, stage: MotifDevelopmentStage)? {
+        let qualified = candidate.flatMap { memory in
+            memory.notes.count >= 3
+                ? HumanPhraseMemory(notes: Array(memory.notes.prefix(8)), ageBars: 0)
+                : nil
+        }
+        if targetBarIndex < configuration.introBars {
+            if let qualified {
+                pendingFugueSubject = qualified
+            }
+            return nil
+        }
+        if fugueSubjectMemory == nil, let initial = qualified ?? pendingFugueSubject {
+            fugueSubjectMemory = initial
+            pendingFugueSubject = nil
+            fugueCycleStartBarIndex = targetBarIndex
+        } else if let qualified {
+            pendingFugueSubject = qualified
+        }
+
+        guard var subject = fugueSubjectMemory,
+              var cycleStart = fugueCycleStartBarIndex else {
+            return nil
+        }
+        let elapsed = max(0, targetBarIndex - cycleStart)
+        if elapsed >= MotifDevelopmentStage.allCases.count,
+           elapsed.isMultiple(of: MotifDevelopmentStage.allCases.count),
+           let pendingFugueSubject {
+            subject = pendingFugueSubject
+            fugueSubjectMemory = pendingFugueSubject
+            self.pendingFugueSubject = nil
+            cycleStart = targetBarIndex
+            fugueCycleStartBarIndex = targetBarIndex
+        }
+        return (
+            subject,
+            MotifDevelopmentStage.stage(at: targetBarIndex - cycleStart)
+        )
+    }
+
+    private func fugueStage(for targetBarIndex: Int) -> MotifDevelopmentStage? {
+        guard fugueSubjectMemory != nil, let fugueCycleStartBarIndex else {
+            return nil
+        }
+        return MotifDevelopmentStage.stage(
+            at: targetBarIndex - fugueCycleStartBarIndex
+        )
     }
 
     private func progressionChord(for barIndex: Int) -> ChordCandidate? {

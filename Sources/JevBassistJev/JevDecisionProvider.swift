@@ -33,6 +33,7 @@ public struct JevChordState: Codable, Equatable, Sendable {
 /// never raw MIDI bytes or credentials.
 public struct JevBassState: Codable, Equatable, Sendable {
     public let accompanimentStyle: String
+    public let developmentStage: String?
     public let targetBarIndex: Int
     public let phrasePosition: Int
     public let noteOnCount: Int
@@ -50,6 +51,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
 
     public init(input: BassDecisionInput) {
         accompanimentStyle = input.style.rawValue
+        developmentStage = input.developmentStage?.rawValue
         targetBarIndex = input.targetBarIndex
         phrasePosition = input.targetBarIndex % 4
         noteOnCount = input.state.noteOnCount
@@ -86,6 +88,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case accompanimentStyle = "accompaniment_style"
+        case developmentStage = "motif_development_stage"
         case targetBarIndex = "target_bar_index"
         case phrasePosition = "phrase_position_in_four_bar_cycle"
         case noteOnCount = "note_on_count"
@@ -258,7 +261,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
 
     public static let fugue = JevBassQuestions(
         activity: JevChoiceQuestion(
-            instructions: "Choose the length and number of voices for a concise Baroque-style imitation of the human's recent subject. Preserve space when the source phrase is dense.",
+            instructions: "Choose the amount of material and number of voices for the supplied motif-development stage. The local engine protects the subject identity and guarantees its periodic return.",
             criteria: [
                 "rest": "Withhold the answer because the subject is unclear or silence has more structural value.",
                 "sparse": "State a short two-note answer without a countersubject.",
@@ -267,7 +270,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             ]
         ),
         relationship: JevChoiceQuestion(
-            instructions: "Choose the temporal treatment of the imitative entry.",
+            instructions: "Choose the temporal attitude inside the supplied development stage without replacing that stage's formal role.",
             criteria: [
                 "follow": "Enter after half a beat using the subject's recognizable rhythmic proportions.",
                 "contrast": "Enter after one beat in rhythmic diminution for a more independent answer.",
@@ -275,7 +278,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             ]
         ),
         motion: JevChoiceQuestion(
-            instructions: "Choose one local contrapuntal transformation. The engine supplies the dominant answer and keeps both voices in safe registers.",
+            instructions: "Choose a secondary contrapuntal inflection. The local eight-bar form already controls answer, sequence, inversion, fragmentation, augmentation, diminution, stretto, and return.",
             criteria: [
                 "root": "Give a real answer on the dominant while preserving the subject intervals.",
                 "step": "Compress wide subject intervals into smoother stepwise motion.",

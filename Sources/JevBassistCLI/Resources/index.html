@@ -821,10 +821,13 @@
           ui.caption.textContent = `Bar ${bar}, beat ${beat}. Play while ${listener} listens and prepares.`;
         } else {
           const source = state.decisionSource ? ` · ${state.decisionSource}` : '';
-          ui.phase.textContent = `Live · ${state.brain}${source}`;
+          const development = state.developmentStage ? ` · ${state.developmentStage}` : '';
+          ui.phase.textContent = `Live · ${state.brain}${source}${development}`;
           ui.caption.textContent = state.style === 'memory'
             ? 'Your gesture bends the left field; its transformed memory returns from the right.'
-            : `Your notes and ${state.style} responses deform the same field.`;
+            : state.style === 'fugue'
+              ? 'Your subject persists while the right field develops it and eventually returns.'
+              : `Your notes and ${state.style} responses deform the same field.`;
         }
       }
       return {beatProgress, absoluteBeat};

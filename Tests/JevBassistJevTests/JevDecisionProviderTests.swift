@@ -45,11 +45,16 @@ final class JevDecisionProviderTests: XCTestCase {
 
     func testFugueStyleUsesImitativeCounterpointQuestions() throws {
         let request = JevSystemOneRequest(
-            input: makeInput(targetBarIndex: 7, style: .fugue)
+            input: makeInput(
+                targetBarIndex: 7,
+                style: .fugue,
+                developmentStage: .stretto
+            )
         )
 
         XCTAssertEqual(request.state.accompanimentStyle, "fugue")
-        XCTAssertTrue(request.questions.activity.instructions.contains("Baroque-style"))
+        XCTAssertEqual(request.state.developmentStage, "stretto")
+        XCTAssertTrue(request.questions.activity.instructions.contains("motif-development"))
         XCTAssertTrue(request.questions.relationship.instructions.contains("temporal"))
         XCTAssertTrue(request.questions.motion.instructions.contains("contrapuntal"))
     }
@@ -152,7 +157,8 @@ final class JevDecisionProviderTests: XCTestCase {
 
     private func makeInput(
         targetBarIndex: Int,
-        style: AccompanimentStyle = .ambient
+        style: AccompanimentStyle = .ambient,
+        developmentStage: MotifDevelopmentStage? = nil
     ) -> BassDecisionInput {
         BassDecisionInput(
             state: MusicalState(
@@ -190,6 +196,7 @@ final class JevDecisionProviderTests: XCTestCase {
                 confidence: 1
             ),
             style: style,
+            developmentStage: developmentStage,
             isHeldChord: false,
             targetBarIndex: targetBarIndex
         )
