@@ -660,6 +660,7 @@ private func runSoundcheck(_ options: SoundcheckOptions) throws {
 private final class JamSession: @unchecked Sendable, JamWebControlling {
     private static let inputGraceMicroseconds: UInt64 = 8_000
     private static let outputSafetyOffsetMicroseconds: UInt64 = 12_000
+    private static let schedulingHorizonMicroseconds: UInt64 = 50_000
 
     private let queue = DispatchQueue(label: "dev.jev-bassist.live-session")
     private let options: JamOptions
@@ -667,6 +668,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private let stopSignal: @Sendable () -> Void
     private let stateHandler: @Sendable (JamWebState) -> Void
     private var engine: LocalBassistEngine
+    private var scheduler: RollingMIDIScheduler
     private var anchorHostTime: UInt64?
     private var startedAt: Date?
     private var timer: DispatchSourceTimer?
@@ -698,6 +700,9 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             ? options.companionVolume
             : options.humanVolume
         companionVolume = options.companionVolume
+        scheduler = try RollingMIDIScheduler(
+            horizonMicroseconds: Self.schedulingHorizonMicroseconds
+        )
         let musicalState = try MusicalStateConfiguration(
             tempoBPM: options.tempoBPM,
             beatsPerBar: options.beatsPerBar
@@ -789,6 +794,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             timer?.cancel()
             timer = nil
             engine.cancelPendingDecisions()
+            _ = scheduler.cancelAllPending()
             do {
                 try output.stop(channel: options.outputChannel)
             } catch {
@@ -836,7 +842,12 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             velocity: event.velocity
         )
         do {
-            try process(engine.ingest(sessionEvent), anchorHostTime: anchorHostTime)
+            try process(
+                engine.ingest(sessionEvent),
+                anchorHostTime: anchorHostTime,
+                currentOffsetMicroseconds: offset,
+                yieldingToHuman: event.kind == .noteOn && event.velocity > 0
+            )
             if options.webUI {
                 appendVisualEvent(
                     performer: "human",
@@ -896,7 +907,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         do {
             try process(
                 engine.advance(through: safeElapsed),
-                anchorHostTime: anchorHostTime
+                anchorHostTime: anchorHostTime,
+                currentOffsetMicroseconds: safeElapsed
             )
             let absoluteBeat = Int(
                 Double(safeElapsed) * options.tempoBPM / 60_000_000
@@ -912,16 +924,14 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
 
     private func process(
         _ update: LocalBassistUpdate,
-        anchorHostTime: UInt64
+        anchorHostTime: UInt64,
+        currentOffsetMicroseconds: UInt64,
+        yieldingToHuman: Bool = false
     ) throws {
         for snapshot in update.snapshots where snapshot.boundary == .bar {
             print(format(snapshot))
             lastChord = snapshot.state.chordCandidates.first?.displayName
         }
-        let outputAnchor = MIDIHostTime.addingMicroseconds(
-            Self.outputSafetyOffsetMicroseconds,
-            to: anchorHostTime
-        )
         for plan in update.plans {
             print(format(plan, style: options.style))
             lastChord = plan.chord?.displayName
@@ -929,21 +939,50 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             lastDevelopmentStage = plan.developmentStage?.rawValue
             lastTonalCenter = plan.tonalCenterPitchClass.map(pitchClassName)
             lastExpression = plan.expression
-            try output.schedule(
-                plan.phrase.messages,
-                anchorHostTime: outputAnchor
-            )
-            if options.webUI {
-                for message in plan.phrase.messages {
-                    appendVisualEvent(
-                        performer: "companion",
-                        kind: message.kind.rawValue,
-                        note: message.note,
-                        velocity: message.velocity,
-                        sessionOffsetMicroseconds: message.offsetMicroseconds
-                            + Self.outputSafetyOffsetMicroseconds
-                    )
-                }
+            if !plan.phrase.messages.isEmpty {
+                scheduler.submit(plan.phrase.messages)
+            }
+        }
+        if yieldingToHuman {
+            let cancellation = scheduler.yieldToHuman(at: currentOffsetMicroseconds)
+            if !cancellation.canceledEventIDs.isEmpty {
+                print(
+                    "Human re-entry canceled \(cancellation.canceledEventIDs.count) "
+                        + "unsent companion MIDI events."
+                )
+            }
+        }
+        try sendDueEvents(
+            currentOffsetMicroseconds: currentOffsetMicroseconds,
+            anchorHostTime: anchorHostTime
+        )
+    }
+
+    private func sendDueEvents(
+        currentOffsetMicroseconds: UInt64,
+        anchorHostTime: UInt64
+    ) throws {
+        let due = try scheduler.drain(through: currentOffsetMicroseconds)
+        guard !due.isEmpty else { return }
+        let outputAnchor = MIDIHostTime.addingMicroseconds(
+            Self.outputSafetyOffsetMicroseconds,
+            to: anchorHostTime
+        )
+        try output.schedule(
+            due.map(\.message),
+            anchorHostTime: outputAnchor
+        )
+        if options.webUI {
+            for event in due {
+                let message = event.message
+                appendVisualEvent(
+                    performer: "companion",
+                    kind: message.kind.rawValue,
+                    note: message.note,
+                    velocity: message.velocity,
+                    sessionOffsetMicroseconds: message.offsetMicroseconds
+                        + Self.outputSafetyOffsetMicroseconds
+                )
             }
         }
     }
