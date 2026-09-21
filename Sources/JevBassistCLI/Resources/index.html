@@ -508,6 +508,7 @@
     const context = ui.visualizer.getContext('2d');
     const pendingEvents = [];
     const activeNotes = new Map();
+    const visualBursts = [];
     const volumeTimers = {};
     const membrane = {positions: [], velocities: [], bands: 15, nodes: 120};
     let state = null;
@@ -524,6 +525,7 @@
     let audioSpectrum = null;
     let audioEnergy = 0;
     let audioBrightness = 0;
+    let fieldFlash = 0;
 
     function resetMembrane() {
       membrane.positions = Array.from(
@@ -589,11 +591,13 @@
       setSlider(ui.companionVolume, ui.companionVolumeValue, next.companionVolume);
       ui.humanVolume.disabled = next.phase === 'stopped';
       ui.companionVolume.disabled = next.phase === 'stopped';
-      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style} after ${next.introBars} bars`;
+      const modalLabel = next.mode ? ` · ${next.tonalCenter ?? '?'} ${next.mode}` : '';
+      ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style}${modalLabel} after ${next.introBars} bars`;
       const harmony = next.nextChord
         ? `${next.chord ?? '—'} → ${next.nextChord}`
         : (next.chord ?? '—');
-      ui.noteReadout.textContent = `CHORD ${harmony} · NOTE ${next.lastNote ?? '—'}`;
+      const center = next.mode ? ` · MODE ${next.tonalCenter ?? '?'} ${next.mode}` : '';
+      ui.noteReadout.textContent = `CHORD ${harmony}${center} · NOTE ${next.lastNote ?? '—'}`;
       ui.armButton.disabled = next.running || next.phase === 'stopped';
       ui.resetButton.disabled = next.phase === 'stopped';
       ui.armButton.textContent = next.running ? 'Running' : 'Start';
@@ -614,6 +618,17 @@
       const key = `${event.performer}:${event.note}`;
       if (event.kind === 'noteOn' && event.velocity > 0) {
         activeNotes.set(key, {...event, startedAt: now});
+        const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
+        const energy = Math.max(.15, event.velocity / 127) * performerGain(event.performer);
+        visualBursts.push({
+          startedAt: now,
+          x: (event.performer === 'human' ? .14 : .86) * viewportWidth,
+          y: (.15 + (1 - pitch) * .7) * viewportHeight,
+          energy,
+          performer: event.performer
+        });
+        if (visualBursts.length > 32) visualBursts.shift();
+        fieldFlash = Math.min(1, fieldFlash + energy * .72);
       } else {
         activeNotes.delete(key);
       }
@@ -676,14 +691,14 @@
       const energy = Math.max(.08, event.velocity / 127) * gain * (onset ? 1 : -.22);
       const direction = event.performer === 'human' ? 1 : -1;
 
-      for (let bandOffset = -3; bandOffset <= 3; bandOffset++) {
+      for (let bandOffset = -5; bandOffset <= 5; bandOffset++) {
         const targetBand = band + bandOffset;
         if (targetBand < 0 || targetBand >= membrane.bands) continue;
-        for (let nodeOffset = -12; nodeOffset <= 12; nodeOffset++) {
+        for (let nodeOffset = -24; nodeOffset <= 24; nodeOffset++) {
           const targetNode = node + nodeOffset;
           if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
-          const falloff = Math.exp(-Math.abs(nodeOffset) * .16 - Math.abs(bandOffset) * .5);
-          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * .62;
+          const falloff = Math.exp(-Math.abs(nodeOffset) * .075 - Math.abs(bandOffset) * .3);
+          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * 1.12;
         }
       }
       if (state?.style === 'fugue' && event.performer === 'companion' && onset) {
@@ -693,7 +708,7 @@
           const targetNode = mirrorNode + nodeOffset;
           if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
           const falloff = Math.exp(-Math.abs(nodeOffset) * .18);
-          membrane.velocities[mirrorBand][targetNode] -= energy * falloff * .38;
+          membrane.velocities[mirrorBand][targetNode] -= energy * falloff * .72;
         }
       }
     }
@@ -741,13 +756,52 @@
       membrane.velocities = nextVelocities;
       for (let band = 0; band < membrane.bands; band++) {
         for (let node = 1; node < membrane.nodes - 1; node++) {
-          membrane.velocities[band][node] = Math.max(-.8, Math.min(.8, membrane.velocities[band][node]));
+          membrane.velocities[band][node] = Math.max(-1.5, Math.min(1.5, membrane.velocities[band][node]));
           membrane.positions[band][node] = Math.max(
-            -2.4,
-            Math.min(2.4, membrane.positions[band][node] + membrane.velocities[band][node] * step)
+            -3.8,
+            Math.min(3.8, membrane.positions[band][node] + membrane.velocities[band][node] * step)
           );
         }
       }
+    }
+
+    function drawBursts(now) {
+      fieldFlash *= .9;
+      if (fieldFlash > .01) {
+        context.fillStyle = `rgba(200,255,69,${fieldFlash * .16})`;
+        context.fillRect(0, 0, viewportWidth, viewportHeight);
+      }
+      context.save();
+      context.globalCompositeOperation = 'screen';
+      for (let index = visualBursts.length - 1; index >= 0; index--) {
+        const burst = visualBursts[index];
+        const age = now - burst.startedAt;
+        if (age > 1800) {
+          visualBursts.splice(index, 1);
+          continue;
+        }
+        const progress = age / 1800;
+        const alpha = (1 - progress) * burst.energy;
+        const radius = 24 + progress * Math.max(viewportWidth, viewportHeight) * .72;
+        const color = burst.performer === 'human' ? '242,240,232' : '200,255,69';
+        const glow = context.createRadialGradient(
+          burst.x, burst.y, 0,
+          burst.x, burst.y, Math.max(1, radius * .55)
+        );
+        glow.addColorStop(0, `rgba(${color},${alpha * .28})`);
+        glow.addColorStop(.35, `rgba(${color},${alpha * .12})`);
+        glow.addColorStop(1, `rgba(${color},0)`);
+        context.fillStyle = glow;
+        context.fillRect(0, 0, viewportWidth, viewportHeight);
+        context.strokeStyle = `rgba(${color},${alpha * .68})`;
+        context.lineWidth = 1.5 + burst.energy * 5 * (1 - progress);
+        context.shadowColor = `rgba(${color},${alpha})`;
+        context.shadowBlur = 22 + burst.energy * 38;
+        context.beginPath();
+        context.arc(burst.x, burst.y, radius, 0, Math.PI * 2);
+        context.stroke();
+      }
+      context.restore();
     }
 
     function drawMembrane(now, beatProgress, absoluteBeat) {
@@ -758,13 +812,14 @@
       const fade = .13 - resonance * .075;
       context.fillStyle = `rgba(8,9,8,${Math.max(.055, fade)})`;
       context.fillRect(0, 0, viewportWidth, viewportHeight);
+      drawBursts(now);
 
       const gradient = context.createLinearGradient(0, 0, viewportWidth, 0);
       gradient.addColorStop(0, `rgba(242,240,232,${.22 + activity * .28})`);
       gradient.addColorStop(.48, `rgba(242,240,232,${.36 + memory * .34})`);
       gradient.addColorStop(1, `rgba(200,255,69,${.28 + memory * .48})`);
       context.strokeStyle = gradient;
-      context.lineWidth = 1.1 + activity * 2.1;
+      context.lineWidth = 1.6 + activity * 3.2;
       context.shadowColor = `rgba(200,255,69,${.16 + activity * .2})`;
       context.shadowBlur = 8 + activity * 18;
 
@@ -777,8 +832,8 @@
         for (let node = 0; node < membrane.nodes; node++) {
           const x = node / (membrane.nodes - 1) * viewportWidth;
           const field = membrane.positions[band][node];
-          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 8;
-          const y = baseline + field * viewportHeight * (.10 + tension * .08) + drift;
+          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 14;
+          const y = baseline + field * viewportHeight * (.16 + tension * .12) + drift;
           if (node === 0) context.moveTo(x, y);
           else context.lineTo(x, y);
         }

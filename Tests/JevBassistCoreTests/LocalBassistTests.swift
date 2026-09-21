@@ -64,6 +64,47 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(decoded.style, .bass)
     }
 
+    func testModalHarmonyInfersDAsCenterForDDorianSubject() {
+        let planner = ModalHarmonyPlanner(mode: .dorian)
+        let notes = [
+            HumanPhraseNote(note: 62, velocity: 92, positionBeats: 0),
+            HumanPhraseNote(note: 65, velocity: 82, positionBeats: 0.5),
+            HumanPhraseNote(note: 67, velocity: 80, positionBeats: 1),
+            HumanPhraseNote(note: 69, velocity: 86, positionBeats: 1.5),
+            HumanPhraseNote(note: 74, velocity: 88, positionBeats: 2)
+        ]
+
+        let center = planner.inferTonalCenter(from: notes)
+        XCTAssertEqual(center, 2)
+        XCTAssertEqual(
+            planner.chord(tonalCenterPitchClass: 2, stage: .answer),
+            ChordCandidate(rootPitchClass: 9, quality: .minor, confidence: 1)
+        )
+        XCTAssertEqual(
+            planner.chord(tonalCenterPitchClass: 2, stage: .returnOfSubject),
+            ChordCandidate(rootPitchClass: 2, quality: .minor, confidence: 1)
+        )
+    }
+
+    func testFugueRequiresModeAndRejectsFixedProgression() throws {
+        let musicalState = try MusicalStateConfiguration()
+        XCTAssertThrowsError(
+            try LocalBassistConfiguration(musicalState: musicalState, style: .fugue)
+        ) { error in
+            XCTAssertEqual(error as? LocalBassistError, .fugueRequiresMode)
+        }
+        XCTAssertThrowsError(
+            try LocalBassistConfiguration(
+                musicalState: musicalState,
+                progression: try ChordProgressionParser.parse("Dm7,G7"),
+                style: .fugue,
+                mode: .dorian
+            )
+        ) { error in
+            XCTAssertEqual(error as? LocalBassistError, .fugueDoesNotUseProgression)
+        }
+    }
+
     func testPhraseGeneratorProducesDeterministicPairedNotesInBassRange() throws {
         let generator = BassPhraseGenerator(outputChannel: 3)
         let decision = BassDecision(
@@ -499,8 +540,8 @@ final class LocalBassistTests: XCTestCase {
                 musicalState: MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4),
                 introBars: 0,
                 outputChannel: 2,
-                progression: try ChordProgressionParser.parse("Cmaj7"),
-                style: .fugue
+                style: .fugue,
+                mode: .ionian
             ),
             decisionProvider: ConstantDecisionProvider(decision: decision)
         )
@@ -539,7 +580,9 @@ final class LocalBassistTests: XCTestCase {
         let returned = plans[7].phrase.messages.filter { $0.kind == .noteOn && $0.note >= 55 }
         let adopted = plans[8].phrase.messages.filter { $0.kind == .noteOn && $0.note >= 55 }
         XCTAssertEqual(returned.map(\.note), [60, 62, 64])
-        XCTAssertEqual(adopted.map(\.note), [67, 70, 74])
+        XCTAssertEqual(plans[0].tonalCenterPitchClass, 0)
+        XCTAssertEqual(plans[8].tonalCenterPitchClass, 8)
+        XCTAssertEqual(adopted.map(\.note), [63, 66, 70])
     }
 
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {

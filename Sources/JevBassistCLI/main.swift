@@ -27,6 +27,7 @@ private struct JamOptions: Sendable {
     let webUI: Bool
     let progression: [ChordCandidate]
     let style: AccompanimentStyle
+    let mode: MusicalMode?
     let humanVolume: UInt8
     let companionVolume: UInt8
 }
@@ -148,7 +149,7 @@ private enum Command {
             allowed: [
                 "--source", "--destination", "--bpm", "--beats-per-bar",
                 "--input-channel", "--output-channel", "--intro-bars", "--brain",
-                "--progression", "--style", "--human-volume", "--companion-volume"
+                "--progression", "--style", "--mode", "--human-volume", "--companion-volume"
             ],
             usage: "jam --source NAME --destination NAME [options]"
         )
@@ -184,6 +185,17 @@ private enum Command {
                 "--style must be 'bass', 'ambient', 'memory', or 'fugue'."
             )
         }
+        let mode: MusicalMode?
+        if let modeName = options["--mode"] {
+            guard let parsed = MusicalMode(rawValue: modeName.lowercased()) else {
+                throw CLIError.invalidArguments(
+                    "--mode must be ionian, dorian, phrygian, lydian, mixolydian, aeolian, or locrian."
+                )
+            }
+            mode = parsed
+        } else {
+            mode = nil
+        }
         let progression: [ChordCandidate]
         if let progressionText = options["--progression"] {
             progression = try ChordProgressionParser.parse(progressionText)
@@ -199,7 +211,8 @@ private enum Command {
             introBars: introBars,
             outputChannel: outputChannel,
             progression: progression,
-            style: style
+            style: style,
+            mode: mode
         )
         return JamOptions(
             source: source,
@@ -213,6 +226,7 @@ private enum Command {
             webUI: webUICount == 1,
             progression: progression,
             style: style,
+            mode: mode,
             humanVolume: humanVolume,
             companionVolume: companionVolume
         )
@@ -324,7 +338,7 @@ USAGE
   jev-bassist capture FILE [--source NAME]
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--progression CHORDS] [--ui]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -406,7 +420,13 @@ private func format(_ plan: BassBarPlan, style: AccompanimentStyle) -> String {
         ? " memory=\(String(format: "%.2f", plan.expression.memory)) tension=\(String(format: "%.2f", plan.expression.tension)) resonance=\(String(format: "%.2f", plan.expression.resonance))"
         : ""
     let development = plan.developmentStage.map { " development=\($0.rawValue)" } ?? ""
-    return "\(style.rawValue) bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held)\(development) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)\(expression)"
+    let center = plan.tonalCenterPitchClass.map { " center=\(pitchClassName($0))" } ?? ""
+    return "\(style.rawValue) bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held)\(development)\(center) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)\(expression)"
+}
+
+private func pitchClassName(_ pitchClass: UInt8) -> String {
+    ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        [Int(pitchClass % 12)]
 }
 
 private let jevTraceLock = NSLock()
@@ -542,6 +562,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var lastChord: String?
     private var lastDecisionSource: String?
     private var lastDevelopmentStage: String?
+    private var lastTonalCenter: String?
     private var lastNote: String?
     private var lastExpression: EnsembleExpression = .quiet
     private var humanVolume: UInt8
@@ -594,7 +615,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 introBars: options.introBars,
                 outputChannel: options.outputChannel,
                 progression: options.progression,
-                style: options.style
+                style: options.style,
+                mode: options.mode
             ),
             decisionProvider: decisionProvider
         )
@@ -791,6 +813,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             lastChord = plan.chord?.displayName
             lastDecisionSource = plan.decisionSource.rawValue
             lastDevelopmentStage = plan.developmentStage?.rawValue
+            lastTonalCenter = plan.tonalCenterPitchClass.map(pitchClassName)
             lastExpression = plan.expression
             try output.schedule(
                 plan.phrase.messages,
@@ -832,6 +855,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 introBars: options.introBars,
                 brain: options.brain.rawValue,
                 style: options.style.rawValue,
+                mode: options.mode?.rawValue,
                 source: options.source,
                 destination: options.destination,
                 startedAtUnixMilliseconds: startedAt.map { $0.timeIntervalSince1970 * 1_000 },
@@ -842,6 +866,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 nextChord: barIndex.flatMap { progressionChord(for: $0 + 1)?.displayName },
                 decisionSource: lastDecisionSource,
                 developmentStage: lastDevelopmentStage,
+                tonalCenter: lastTonalCenter,
                 lastNote: lastNote,
                 humanChannel: options.inputChannel,
                 companionChannel: options.outputChannel,
@@ -965,7 +990,8 @@ private func runJam(_ options: JamOptions) throws {
     } else {
         print("Mix: you=\(options.humanVolume) on channel \(options.inputChannel), companion=\(options.companionVolume) on channel \(options.outputChannel).")
     }
-    print("Style: \(options.style.rawValue).")
+    let mode = options.mode.map { " · mode \($0.rawValue)" } ?? ""
+    print("Style: \(options.style.rawValue)\(mode).")
     print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
     if !options.progression.isEmpty {
         print("Harmony: \(options.progression.map(\.displayName).joined(separator: " → ")) (loops after the intro).")

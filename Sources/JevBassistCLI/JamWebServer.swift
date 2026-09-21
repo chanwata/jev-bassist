@@ -18,6 +18,7 @@ struct JamWebState: Codable, Sendable {
     let introBars: Int
     let brain: String
     let style: String
+    let mode: String?
     let source: String
     let destination: String
     let startedAtUnixMilliseconds: Double?
@@ -28,6 +29,7 @@ struct JamWebState: Codable, Sendable {
     let nextChord: String?
     let decisionSource: String?
     let developmentStage: String?
+    let tonalCenter: String?
     let lastNote: String?
     let humanChannel: UInt8
     let companionChannel: UInt8

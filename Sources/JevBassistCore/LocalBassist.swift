@@ -117,6 +117,8 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
     public let nextChord: ChordCandidate?
     public let style: AccompanimentStyle
     public let developmentStage: MotifDevelopmentStage?
+    public let mode: MusicalMode?
+    public let tonalCenterPitchClass: UInt8?
     public let isHeldChord: Bool
     public let targetBarIndex: Int
 
@@ -126,6 +128,8 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         nextChord: ChordCandidate? = nil,
         style: AccompanimentStyle = .bass,
         developmentStage: MotifDevelopmentStage? = nil,
+        mode: MusicalMode? = nil,
+        tonalCenterPitchClass: UInt8? = nil,
         isHeldChord: Bool,
         targetBarIndex: Int
     ) {
@@ -134,6 +138,8 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         self.nextChord = nextChord
         self.style = style
         self.developmentStage = developmentStage
+        self.mode = mode
+        self.tonalCenterPitchClass = tonalCenterPitchClass
         self.isHeldChord = isHeldChord
         self.targetBarIndex = targetBarIndex
     }
@@ -144,6 +150,8 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         case nextChord
         case style
         case developmentStage
+        case mode
+        case tonalCenterPitchClass
         case isHeldChord
         case targetBarIndex
     }
@@ -157,6 +165,11 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
         developmentStage = try container.decodeIfPresent(
             MotifDevelopmentStage.self,
             forKey: .developmentStage
+        )
+        mode = try container.decodeIfPresent(MusicalMode.self, forKey: .mode)
+        tonalCenterPitchClass = try container.decodeIfPresent(
+            UInt8.self,
+            forKey: .tonalCenterPitchClass
         )
         isHeldChord = try container.decode(Bool.self, forKey: .isHeldChord)
         targetBarIndex = try container.decode(Int.self, forKey: .targetBarIndex)
@@ -1123,7 +1136,8 @@ public struct FuguePhraseGenerator: Sendable {
         memory: HumanPhraseMemory?,
         previousNotes: [UInt8],
         humanAverageVelocity: Double?,
-        stage: MotifDevelopmentStage = .answer
+        stage: MotifDevelopmentStage = .answer,
+        tonalCenterPitchClass: UInt8? = nil
     ) -> MemoryPhraseResult {
         let barLength = musicalStateConfiguration.boundaryMicroseconds(
             afterBeats: musicalStateConfiguration.beatsPerBar
@@ -1158,7 +1172,8 @@ public struct FuguePhraseGenerator: Sendable {
             motion: decision.motion,
             chord: chord,
             previousNotes: previousNotes,
-            stage: stage
+            stage: stage,
+            usesModalHarmony: tonalCenterPitchClass != nil
         )
         var finalSubjectNotes = subjectNotes
         if decision.fill && stage != .returnOfSubject,
@@ -1339,20 +1354,25 @@ public struct FuguePhraseGenerator: Sendable {
         motion: BassMotion,
         chord: ChordCandidate?,
         previousNotes: [UInt8],
-        stage: MotifDevelopmentStage
+        stage: MotifDevelopmentStage,
+        usesModalHarmony: Bool
     ) -> [UInt8] {
         guard let first = subject.first else { return [] }
         let tonic = Int(chord?.rootPitchClass ?? (first.note % 12))
         let answerPitchClass: Int
-        switch stage {
-        case .answer, .diminution:
-            answerPitchClass = (tonic + 7) % 12
-        case .sequence:
-            answerPitchClass = (tonic + 2) % 12
-        case .augmentation:
-            answerPitchClass = (tonic + 9) % 12
-        default:
+        if usesModalHarmony {
             answerPitchClass = tonic
+        } else {
+            switch stage {
+            case .answer, .diminution:
+                answerPitchClass = (tonic + 7) % 12
+            case .sequence:
+                answerPitchClass = (tonic + 2) % 12
+            case .augmentation:
+                answerPitchClass = (tonic + 9) % 12
+            default:
+                answerPitchClass = tonic
+            }
         }
         let reference = Int(previousNotes.last ?? 67)
         let anchor = nearest(pitchClass: answerPitchClass, to: reference, in: 55...67)
@@ -1532,6 +1552,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
     public let decision: BassDecision
     public let decisionSource: BassDecisionSource
     public let developmentStage: MotifDevelopmentStage?
+    public let tonalCenterPitchClass: UInt8?
     public let phrase: BassPhrase
     public let expression: EnsembleExpression
 
@@ -1543,6 +1564,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         decision: BassDecision,
         decisionSource: BassDecisionSource = .rules,
         developmentStage: MotifDevelopmentStage? = nil,
+        tonalCenterPitchClass: UInt8? = nil,
         phrase: BassPhrase,
         expression: EnsembleExpression = .quiet
     ) {
@@ -1553,6 +1575,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         self.decision = decision
         self.decisionSource = decisionSource
         self.developmentStage = developmentStage
+        self.tonalCenterPitchClass = tonalCenterPitchClass
         self.phrase = phrase
         self.expression = expression
     }
@@ -1572,6 +1595,9 @@ public enum LocalBassistError: Error, CustomStringConvertible, Equatable {
     case invalidIntroBars(Int)
     case invalidMaximumHeldChordBars(Int)
     case invalidOutputChannel(UInt8)
+    case fugueRequiresMode
+    case fugueDoesNotUseProgression
+    case modeOnlyAppliesToFugue
 
     public var description: String {
         switch self {
@@ -1581,6 +1607,12 @@ public enum LocalBassistError: Error, CustomStringConvertible, Equatable {
             return "Maximum held-chord bars must be between 0 and 16; received \(value)."
         case let .invalidOutputChannel(value):
             return "MIDI output channel must be between 1 and 16; received \(value)."
+        case .fugueRequiresMode:
+            return "Fugue style requires --mode instead of a fixed chord progression."
+        case .fugueDoesNotUseProgression:
+            return "Fugue style develops harmony from --mode; remove --progression."
+        case .modeOnlyAppliesToFugue:
+            return "--mode currently applies only to --style fugue."
         }
     }
 }
@@ -1592,6 +1624,7 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
     public let outputChannel: UInt8
     public let progression: [ChordCandidate]
     public let style: AccompanimentStyle
+    public let mode: MusicalMode?
 
     public init(
         musicalState: MusicalStateConfiguration,
@@ -1599,7 +1632,8 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
         maximumHeldChordBars: Int = 2,
         outputChannel: UInt8 = 3,
         progression: [ChordCandidate] = [],
-        style: AccompanimentStyle = .bass
+        style: AccompanimentStyle = .bass,
+        mode: MusicalMode? = nil
     ) throws {
         guard (0...32).contains(introBars) else {
             throw LocalBassistError.invalidIntroBars(introBars)
@@ -1610,12 +1644,22 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
         guard (1...16).contains(outputChannel) else {
             throw LocalBassistError.invalidOutputChannel(outputChannel)
         }
+        if style == .fugue, mode == nil {
+            throw LocalBassistError.fugueRequiresMode
+        }
+        if style == .fugue, !progression.isEmpty {
+            throw LocalBassistError.fugueDoesNotUseProgression
+        }
+        if style != .fugue, mode != nil {
+            throw LocalBassistError.modeOnlyAppliesToFugue
+        }
         self.musicalState = musicalState
         self.introBars = introBars
         self.maximumHeldChordBars = maximumHeldChordBars
         self.outputChannel = outputChannel
         self.progression = progression
         self.style = style
+        self.mode = mode
     }
 }
 
@@ -1637,6 +1681,7 @@ public struct LocalBassistEngine: Sendable {
     private var fugueSubjectMemory: HumanPhraseMemory?
     private var pendingFugueSubject: HumanPhraseMemory?
     private var fugueCycleStartBarIndex: Int?
+    private var fugueTonalCenterPitchClass: UInt8?
 
     public init(
         configuration: LocalBassistConfiguration,
@@ -1697,17 +1742,32 @@ public struct LocalBassistEngine: Sendable {
                     targetBarIndex: targetBarIndex
                 )
                 : nil
+            let nextFugueDevelopment = previewFugueDevelopment(
+                targetBarIndex: targetBarIndex + 1
+            )
             let liveChord = currentChord ?? (mayHoldChord ? lastChord : nil)
             let plannedChord = progressionChord(for: targetBarIndex)
-            let resolvedChord = plannedChord ?? liveChord
-            let usedHeldChord = plannedChord == nil && currentChord == nil && resolvedChord != nil
+            let modalChord = fugueDevelopment.flatMap {
+                chord(for: $0.stage, tonalCenterPitchClass: $0.tonalCenterPitchClass)
+            }
+            let nextChord = progressionChord(for: targetBarIndex + 1)
+                ?? nextFugueDevelopment.flatMap {
+                    chord(for: $0.stage, tonalCenterPitchClass: $0.tonalCenterPitchClass)
+                }
+            let resolvedChord = plannedChord ?? modalChord ?? liveChord
+            let usedHeldChord = plannedChord == nil
+                && modalChord == nil
+                && currentChord == nil
+                && resolvedChord != nil
             if targetBarIndex >= configuration.introBars {
                 let input = BassDecisionInput(
                     state: snapshot.state,
                     chord: resolvedChord,
-                    nextChord: progressionChord(for: targetBarIndex + 1),
+                    nextChord: nextChord,
                     style: configuration.style,
                     developmentStage: fugueDevelopment?.stage,
+                    mode: configuration.mode,
+                    tonalCenterPitchClass: fugueDevelopment?.tonalCenterPitchClass,
                     isHeldChord: usedHeldChord,
                     targetBarIndex: targetBarIndex
                 )
@@ -1724,7 +1784,7 @@ public struct LocalBassistEngine: Sendable {
                         musicalStateConfiguration: configuration.musicalState,
                         previousBassNote: previousBassNote,
                         humanAverageVelocity: snapshot.state.averageVelocity,
-                        nextChord: progressionChord(for: targetBarIndex + 1)
+                        nextChord: nextChord
                     )
                     expression = .quiet
                 case .ambient:
@@ -1755,14 +1815,15 @@ public struct LocalBassistEngine: Sendable {
                     let result = fuguePhraseGenerator.generate(
                         decision: resolution.decision,
                         chord: resolvedChord,
-                        nextChord: progressionChord(for: targetBarIndex + 1),
+                        nextChord: nextChord,
                         barIndex: targetBarIndex,
                         startMicroseconds: snapshot.endMicroseconds,
                         musicalStateConfiguration: configuration.musicalState,
                         memory: fugueDevelopment?.memory,
                         previousNotes: previousPhraseNotes,
                         humanAverageVelocity: snapshot.state.averageVelocity,
-                        stage: fugueDevelopment?.stage ?? .answer
+                        stage: fugueDevelopment?.stage ?? .answer,
+                        tonalCenterPitchClass: fugueDevelopment?.tonalCenterPitchClass
                     )
                     phrase = result.phrase
                     expression = result.expression
@@ -1784,6 +1845,7 @@ public struct LocalBassistEngine: Sendable {
                         decision: resolution.decision,
                         decisionSource: resolution.source,
                         developmentStage: fugueDevelopment?.stage,
+                        tonalCenterPitchClass: fugueDevelopment?.tonalCenterPitchClass,
                         phrase: phrase,
                         expression: expression
                     )
@@ -1793,15 +1855,31 @@ public struct LocalBassistEngine: Sendable {
             let preparedTargetBarIndex = targetBarIndex + 1
             if preparedTargetBarIndex >= configuration.introBars {
                 let preparedPlannedChord = progressionChord(for: preparedTargetBarIndex)
-                let preparedChord = preparedPlannedChord ?? liveChord
+                let preparedFugue = previewFugueDevelopment(
+                    targetBarIndex: preparedTargetBarIndex
+                )
+                let preparedModalChord = preparedFugue.flatMap {
+                    chord(for: $0.stage, tonalCenterPitchClass: $0.tonalCenterPitchClass)
+                }
+                let followingFugue = previewFugueDevelopment(
+                    targetBarIndex: preparedTargetBarIndex + 1
+                )
+                let preparedChord = preparedPlannedChord ?? preparedModalChord ?? liveChord
+                let preparedNextChord = progressionChord(for: preparedTargetBarIndex + 1)
+                    ?? followingFugue.flatMap {
+                        chord(for: $0.stage, tonalCenterPitchClass: $0.tonalCenterPitchClass)
+                    }
                 decisionProvider.prepare(
                     BassDecisionInput(
                         state: snapshot.state,
                         chord: preparedChord,
-                        nextChord: progressionChord(for: preparedTargetBarIndex + 1),
+                        nextChord: preparedNextChord,
                         style: configuration.style,
-                        developmentStage: fugueStage(for: preparedTargetBarIndex),
+                        developmentStage: preparedFugue?.stage,
+                        mode: configuration.mode,
+                        tonalCenterPitchClass: preparedFugue?.tonalCenterPitchClass,
                         isHeldChord: preparedPlannedChord == nil
+                            && preparedModalChord == nil
                             && currentChord == nil
                             && preparedChord != nil,
                         targetBarIndex: preparedTargetBarIndex
@@ -1859,7 +1937,11 @@ public struct LocalBassistEngine: Sendable {
     private mutating func updateFugueDevelopment(
         candidate: HumanPhraseMemory?,
         targetBarIndex: Int
-    ) -> (memory: HumanPhraseMemory, stage: MotifDevelopmentStage)? {
+    ) -> (
+        memory: HumanPhraseMemory,
+        stage: MotifDevelopmentStage,
+        tonalCenterPitchClass: UInt8
+    )? {
         let qualified = candidate.flatMap { memory in
             memory.notes.count >= 3
                 ? HumanPhraseMemory(notes: Array(memory.notes.prefix(8)), ageBars: 0)
@@ -1875,6 +1957,7 @@ public struct LocalBassistEngine: Sendable {
             fugueSubjectMemory = initial
             pendingFugueSubject = nil
             fugueCycleStartBarIndex = targetBarIndex
+            fugueTonalCenterPitchClass = modalPlanner?.inferTonalCenter(from: initial.notes)
         } else if let qualified {
             pendingFugueSubject = qualified
         }
@@ -1892,19 +1975,55 @@ public struct LocalBassistEngine: Sendable {
             self.pendingFugueSubject = nil
             cycleStart = targetBarIndex
             fugueCycleStartBarIndex = targetBarIndex
+            fugueTonalCenterPitchClass = modalPlanner?.inferTonalCenter(
+                from: subject.notes
+            )
         }
+        guard let fugueTonalCenterPitchClass else { return nil }
         return (
             subject,
-            MotifDevelopmentStage.stage(at: targetBarIndex - cycleStart)
+            MotifDevelopmentStage.stage(at: targetBarIndex - cycleStart),
+            fugueTonalCenterPitchClass
         )
     }
 
-    private func fugueStage(for targetBarIndex: Int) -> MotifDevelopmentStage? {
-        guard fugueSubjectMemory != nil, let fugueCycleStartBarIndex else {
+    private func previewFugueDevelopment(
+        targetBarIndex: Int
+    ) -> (
+        memory: HumanPhraseMemory,
+        stage: MotifDevelopmentStage,
+        tonalCenterPitchClass: UInt8
+    )? {
+        guard let subject = fugueSubjectMemory,
+              let cycleStart = fugueCycleStartBarIndex,
+              let tonalCenter = fugueTonalCenterPitchClass else {
             return nil
         }
-        return MotifDevelopmentStage.stage(
-            at: targetBarIndex - fugueCycleStartBarIndex
+        let elapsed = max(0, targetBarIndex - cycleStart)
+        if elapsed >= MotifDevelopmentStage.allCases.count,
+           elapsed.isMultiple(of: MotifDevelopmentStage.allCases.count),
+           let pendingFugueSubject,
+           let pendingCenter = modalPlanner?.inferTonalCenter(from: pendingFugueSubject.notes) {
+            return (pendingFugueSubject, .answer, pendingCenter)
+        }
+        return (
+            subject,
+            MotifDevelopmentStage.stage(at: elapsed),
+            tonalCenter
+        )
+    }
+
+    private var modalPlanner: ModalHarmonyPlanner? {
+        configuration.mode.map { ModalHarmonyPlanner(mode: $0) }
+    }
+
+    private func chord(
+        for stage: MotifDevelopmentStage,
+        tonalCenterPitchClass: UInt8
+    ) -> ChordCandidate? {
+        modalPlanner?.chord(
+            tonalCenterPitchClass: tonalCenterPitchClass,
+            stage: stage
         )
     }
 
