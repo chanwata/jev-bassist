@@ -527,14 +527,7 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(result.expression.memory, 0.87, accuracy: 0.000_001)
     }
 
-    func testFugueEngineDevelopsOneSubjectAcrossEightBarsThenAdoptsPendingSubject() throws {
-        let decision = BassDecision(
-            activity: .normal,
-            relationship: .follow,
-            motion: .root,
-            fill: false,
-            confidence: 1
-        )
+    func testFugueEngineAnswersFinalizedMotifOnNextBeatWithoutFixedDevelopment() throws {
         var engine = LocalBassistEngine(
             configuration: try LocalBassistConfiguration(
                 musicalState: MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4),
@@ -542,8 +535,7 @@ final class LocalBassistTests: XCTestCase {
                 outputChannel: 2,
                 style: .fugue,
                 mode: .ionian
-            ),
-            decisionProvider: ConstantDecisionProvider(decision: decision)
+            )
         )
         let firstSubjectEvents: [(UInt64, MIDIEvent.Kind, UInt8, UInt8)] = [
             (0, .noteOn, 60, 84),
@@ -563,7 +555,7 @@ final class LocalBassistTests: XCTestCase {
                 velocity: velocity
             ))
         }
-        var plans = try engine.advance(through: 2_000_000).plans
+        let firstUpdate = try engine.advance(through: 2_000_000)
         let secondSubjectEvents: [(UInt64, MIDIEvent.Kind, UInt8, UInt8)] = [
             (2_100_000, .noteOn, 65, 82),
             (2_220_000, .noteOff, 65, 0),
@@ -582,23 +574,24 @@ final class LocalBassistTests: XCTestCase {
                 velocity: velocity
             ))
         }
-        for boundary in 2...9 {
-            plans += try engine.advance(through: UInt64(boundary) * 2_000_000).plans
-        }
+        let secondUpdate = try engine.advance(through: 4_000_000)
 
-        XCTAssertEqual(
-            plans.map(\.developmentStage),
-            [
-                .answer, .sequence, .inversion, .fragmentation,
-                .augmentation, .diminution, .stretto, .returnOfSubject, .answer
-            ]
-        )
-        let returned = plans[7].phrase.messages.filter { $0.kind == .noteOn && $0.note >= 55 }
-        let adopted = plans[8].phrase.messages.filter { $0.kind == .noteOn && $0.note >= 55 }
-        XCTAssertEqual(returned.map(\.note), [60, 62, 64])
-        XCTAssertEqual(plans[0].tonalCenterPitchClass, 0)
-        XCTAssertEqual(plans[8].tonalCenterPitchClass, 8)
-        XCTAssertEqual(adopted.map(\.note), [63, 66, 70])
+        let firstPlan = try XCTUnwrap(firstUpdate.plans.first)
+        let secondPlan = try XCTUnwrap(secondUpdate.plans.first)
+        let firstNoteOns = firstPlan.phrase.messages.filter { $0.kind == .noteOn }
+        let firstNoteOffs = firstPlan.phrase.messages.filter { $0.kind == .noteOff }
+
+        XCTAssertEqual(firstUpdate.plans.count, 1)
+        XCTAssertEqual(firstPlan.developmentStage, nil)
+        XCTAssertEqual(firstPlan.tonalCenterPitchClass, 0)
+        XCTAssertEqual(firstPlan.phrase.startMicroseconds, 1_000_000)
+        XCTAssertEqual(firstNoteOns.map(\.note), [60, 62, 64])
+        XCTAssertEqual(firstNoteOns.count, firstNoteOffs.count)
+        XCTAssertLessThan(firstNoteOffs[0].offsetMicroseconds, firstNoteOns[1].offsetMicroseconds)
+        XCTAssertLessThan(firstNoteOffs[1].offsetMicroseconds, firstNoteOns[2].offsetMicroseconds)
+        XCTAssertEqual(secondUpdate.plans.count, 1)
+        XCTAssertNil(secondPlan.developmentStage)
+        XCTAssertNotEqual(secondPlan.phrase.startMicroseconds % 2_000_000, 0)
     }
 
     func testPhraseGeneratorProducesSilenceForRestDecision() throws {

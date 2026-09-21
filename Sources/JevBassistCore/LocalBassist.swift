@@ -1743,6 +1743,7 @@ public struct LocalBassistEngine: Sendable {
     private var phraseSegmenter: PhraseSegmenter
     private var motifMemory = MotifMemory()
     private var pendingMotifs: [Motif] = []
+    private var conversationEngine: ConversationEngine?
     private var recentPhraseMemory: HumanPhraseMemory?
     private var fugueSubjectMemory: HumanPhraseMemory?
     private var pendingFugueSubject: HumanPhraseMemory?
@@ -1770,6 +1771,15 @@ public struct LocalBassistEngine: Sendable {
         phraseSegmenter = PhraseSegmenter(
             musicalStateConfiguration: configuration.musicalState
         )
+        conversationEngine = configuration.style == .fugue
+            ? configuration.mode.map {
+                ConversationEngine(
+                    musicalStateConfiguration: configuration.musicalState,
+                    mode: $0,
+                    outputChannel: configuration.outputChannel
+                )
+            }
+            : nil
     }
 
     public mutating func ingest(_ event: SessionMIDIEvent) throws -> LocalBassistUpdate {
@@ -1785,11 +1795,13 @@ public struct LocalBassistEngine: Sendable {
         performanceTracker = nextPerformanceTracker
         phraseSegmenter = nextPhraseSegmenter
         let motifs = remember(observationsBeforeEvent)
+        let conversationPlans = plans(for: motifs)
         return Self.enriching(
             makeUpdate(from: snapshots),
             performance: performance,
             observations: observationsBeforeEvent,
-            motifs: motifs
+            motifs: motifs,
+            additionalPlans: conversationPlans
         )
     }
 
@@ -1802,10 +1814,12 @@ public struct LocalBassistEngine: Sendable {
         let snapshots = try tracker.advance(through: offsetMicroseconds)
         phraseSegmenter = nextPhraseSegmenter
         let motifs = remember(observations)
+        let conversationPlans = plans(for: motifs)
         return Self.enriching(
             makeUpdate(from: snapshots),
             observations: observations,
-            motifs: motifs
+            motifs: motifs,
+            additionalPlans: conversationPlans
         )
     }
 
@@ -1819,11 +1833,13 @@ public struct LocalBassistEngine: Sendable {
         performanceTracker = nextPerformanceTracker
         phraseSegmenter = nextPhraseSegmenter
         let motifs = remember(observations)
+        let conversationPlans = plans(for: motifs)
         return Self.enriching(
             makeUpdate(from: snapshots),
             performance: performance,
             observations: observations,
-            motifs: motifs
+            motifs: motifs,
+            additionalPlans: conversationPlans
         )
     }
 
@@ -1836,6 +1852,9 @@ public struct LocalBassistEngine: Sendable {
     ) -> LocalBassistUpdate {
         var plans: [BassBarPlan] = []
         for snapshot in snapshots where snapshot.boundary == .bar {
+            if conversationEngine != nil {
+                continue
+            }
             let memory = phraseMemory(for: snapshot)
             let currentChord = snapshot.state.chordCandidates.first
             if let currentChord {
@@ -2009,9 +2028,16 @@ public struct LocalBassistEngine: Sendable {
             ) else {
                 return nil
             }
-            pendingMotifs.append(motif)
+            if conversationEngine == nil {
+                pendingMotifs.append(motif)
+            }
             return motif
         }
+    }
+
+    private func plans(for motifs: [Motif]) -> [BassBarPlan] {
+        guard let conversationEngine else { return [] }
+        return motifs.compactMap { conversationEngine.plan(for: $0) }
     }
 
     private mutating func phraseMemory(
@@ -2042,11 +2068,12 @@ public struct LocalBassistEngine: Sendable {
         _ update: LocalBassistUpdate,
         performance: PerformanceTrackerUpdate = PerformanceTrackerUpdate(),
         observations: [PhraseObservation] = [],
-        motifs: [Motif] = []
+        motifs: [Motif] = [],
+        additionalPlans: [BassBarPlan] = []
     ) -> LocalBassistUpdate {
         LocalBassistUpdate(
             snapshots: update.snapshots,
-            plans: update.plans,
+            plans: update.plans + additionalPlans,
             performedNotes: performance.completedNotes,
             phraseObservations: observations,
             motifs: motifs,

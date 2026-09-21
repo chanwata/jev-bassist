@@ -27,9 +27,10 @@ final class SessionEvaluationTests: XCTestCase {
         XCTAssertEqual(first.input, fixture)
         XCTAssertEqual(first.configuration.style, .fugue)
         XCTAssertEqual(first.configuration.mode, .dorian)
-        XCTAssertEqual(first.plans.map(\.developmentStage), [nil, .answer])
-        XCTAssertTrue(first.plans[0].phrase.messages.isEmpty)
-        XCTAssertFalse(first.plans[1].phrase.messages.isEmpty)
+        XCTAssertEqual(first.plans.count, 1)
+        XCTAssertEqual(first.plans.map(\.developmentStage), [nil])
+        XCTAssertFalse(first.plans[0].phrase.messages.isEmpty)
+        XCTAssertEqual(first.plans[0].phrase.startMicroseconds, 2_500_000)
         XCTAssertEqual(first.performedNotes.count, 4)
         XCTAssertEqual(
             first.performedNotes.map(\.durationMicroseconds),

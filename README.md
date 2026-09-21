@@ -337,7 +337,9 @@ The duration-aware memory pairs Note On/Off events, distinguishes observed relea
 
 Live accompaniment uses a 50 ms rolling MIDI horizon. A generated phrase may describe a longer response, but only events inside that horizon are handed to CoreMIDI. When the human re-enters, unsent companion Note On events and their paired releases are removed; releases belonging to already committed attacks remain scheduled. Full destination flush and channel silence remain reserved for explicit stop or failure.
 
-This evaluation command records the current engine faithfully; it does not make the current eight-stage fugue conversational. The next milestones add interruptible short-horizon scheduling, then replace the fixed development path with context-driven responses.
+For `--style fugue`, a finalized motif now enters the local conversation engine instead of the legacy fixed eight-bar development cycle. The first response is deliberately conservative: one modal voice on the next shared beat, preserving the motif's relative rhythm, duration, rests, and accents. The candidate set is bounded to silence, a close echo, a final-note variation, and a held tone; the local arbiter may choose silence when no safe recognizable answer exists.
+
+The evaluation command records this conversation path deterministically. The next milestones add context-driven development and original-subject return, then compare local and Jev candidate selection on the same traces.
 
 ## Build and test
 
@@ -350,9 +352,8 @@ Pure MIDI decoding, fixture validation, replay, deterministic ensemble evaluatio
 
 ## Planned path
 
-1. Replace the fixed fugue development with a one-voice modal response whose connection to the human motif is audible before adding further development.
-2. Add context-driven development and original-subject return only after the short response passes live listening evaluation.
-3. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
-4. Carry motif lineage and confirmed scheduler events into the performance visual.
+1. Add context-driven development and original-subject return only after the short response passes live listening evaluation.
+2. Compare local and Jev candidate selection using identical traces and live sessions, then report timing distributions separately from intentional musical delay.
+3. Carry motif lineage and confirmed scheduler events into the performance visual.
 
 See [SPEC.md](SPEC.md) for acceptance criteria and architecture constraints.

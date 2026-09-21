@@ -162,6 +162,16 @@ The primary human evaluation is a short rating of “this felt like another play
 - publish companion visual events only after the corresponding MIDI event crosses the commitment horizon;
 - clear the internal queue on explicit stop, then use the existing destination flush and channel silence as the terminal safety action.
 
+### M12 P3: local one-voice conversation
+
+- route finalized `fugue` motifs into a conversation engine instead of the fixed eight-stage live path;
+- generate a bounded candidate set: silence, close echo, final-note variation, and held tone;
+- start the selected response on the next shared beat rather than waiting for a bar boundary;
+- preserve relative onset, duration, rests, and velocity contour unless a candidate explicitly changes that feature;
+- project only generated out-of-mode pitches to the nearest conservative modal tone while retaining the observed human motif unchanged;
+- render one companion voice with paired releases and no overlapping machine attacks;
+- retain the legacy fugue generator as directly testable comparison code, not a hidden live fallback.
+
 ## Out of scope for the early MVP
 
 - audio transcription;
