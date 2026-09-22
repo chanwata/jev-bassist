@@ -256,7 +256,7 @@ The primary human evaluation is a short rating of “this felt like another play
 - replace the soft layered plate aesthetic with a restrained black, white, cyan, and signal-red kinetic score built from precision traces, correspondence vectors, scan pulses, and a beat-driven perspective grid;
 - make spatial motion follow committed pitch/time lineage, shared clock phase, drum role, keyboard pitch, and optional local audio energy rather than an unrelated decorative simulation;
 - keep human and companion identity distinct while drawing both in one coordinate system and preserving exact sounded-prefix, cancellation, reconnect, and reduced-motion behavior;
-- shorten adaptive phrase-release detection from 0.5–1.5 beats to 0.35–1 beat without splitting held notes;
+- shorten adaptive phrase-release detection from 0.5–1.5 beats to 0.4–1.25 beats without splitting an established phrase across an ordinary articulation gap;
 - reserve only 60 ms of response scheduling lead and use quarter-beat or fine swung entry opportunities instead of waiting for a full eighth-note grid location;
 - retain local deterministic fallback at the reserved onset when Jev misses the musical deadline, with decision provenance visible in the terminal and browser state;
 - add deterministic tests for the tightened phrase boundary, straight response grid, swung response grid, and browser render loop.

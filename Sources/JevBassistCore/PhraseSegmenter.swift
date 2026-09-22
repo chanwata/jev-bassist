@@ -180,8 +180,8 @@ public struct PhraseSegmenter: Sendable {
         // the player has released the phrase. Keep enough silence to avoid
         // splitting ordinary articulation, while adapting to the player's
         // observed onset spacing.
-        let adaptive = typicalInterval * 0.55
-        return UInt64(max(beat * 0.35, min(beat, adaptive)).rounded())
+        let adaptive = typicalInterval * 0.65
+        return UInt64(max(beat * 0.4, min(beat * 1.25, adaptive)).rounded())
     }
 
     private mutating func finalize(
