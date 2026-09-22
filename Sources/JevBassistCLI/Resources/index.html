@@ -48,6 +48,31 @@
 
     button, input, select { font: inherit; }
 
+    .start-overlay {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      z-index: 4;
+      display: none;
+      min-width: 142px;
+      padding: 12px 18px;
+      border: 1px solid rgba(200,255,69,.32);
+      border-radius: 999px;
+      background: rgba(8,9,8,.68);
+      color: var(--acid);
+      box-shadow: 0 0 42px rgba(200,255,69,.08);
+      backdrop-filter: blur(12px);
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    body.session-ready .start-overlay { display: block; }
+    .start-overlay:hover { background: rgba(200,255,69,.12); transform: translate(-50%, calc(-50% - 1px)); }
+    .start-overlay:active { transform: translate(-50%, -50%); }
+    .start-overlay:disabled { display: none; }
+
     .shell {
       position: relative;
       z-index: 2;
@@ -439,6 +464,7 @@
 </head>
 <body>
   <canvas id="visualizer" aria-hidden="true"></canvas>
+  <button class="start-overlay" id="startOverlay" type="button" disabled>Start session</button>
   <div class="shell">
     <header>
       <div class="brand">JEV/ENSEMBLE <span>live system</span></div>
@@ -556,7 +582,7 @@
 
   <script>
     const ui = Object.fromEntries([
-      'visualizer','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
+      'visualizer','startOverlay','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
       'beatStrip','caption','midiInput','bpm','beats','intro','armButton','audioButton','resetButton','hint',
       'noteReadout','footerTiming','humanChannel','companionChannel','drumChannel','textureChannel',
       'humanVolume','companionVolume','drumVolume','textureVolume','humanVolumeValue',
@@ -699,6 +725,11 @@
       const center = next.mode ? ` · MODE ${next.tonalCenter ?? '?'} ${next.mode}` : '';
       ui.noteReadout.textContent = `CHORD ${harmony}${center} · NOTE ${next.lastNote ?? '—'}`;
       ui.armButton.disabled = next.running || next.phase === 'stopped';
+      ui.startOverlay.disabled = next.running || next.phase === 'stopped';
+      document.body.classList.toggle(
+        'session-ready',
+        !next.running && next.phase !== 'stopped'
+      );
       ui.resetButton.disabled = next.phase === 'stopped';
       ui.armButton.textContent = next.running ? 'Running' : 'Start';
       rebuildBeats(next.beatsPerBar);
@@ -1320,6 +1351,7 @@
     }
 
     ui.armButton.addEventListener('click', () => command('start'));
+    ui.startOverlay.addEventListener('click', () => command('start'));
     ui.audioButton.addEventListener('click', () => toggleAudio(false));
     ui.resetButton.addEventListener('click', () => command('stop'));
     ui.humanVolume.addEventListener('input', event => queueVolume('human', event.target.value));
@@ -1364,7 +1396,9 @@
     events.onerror = () => {
       ui.connection.classList.remove('online');
       ui.connectionText.textContent = 'Swift disconnected';
+      document.body.classList.remove('session-ready');
       ui.armButton.disabled = true;
+      ui.startOverlay.disabled = true;
       ui.resetButton.disabled = true;
       ui.humanVolume.disabled = true;
       ui.companionVolume.disabled = true;
