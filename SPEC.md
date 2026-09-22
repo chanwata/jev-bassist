@@ -224,6 +224,19 @@ The primary human evaluation is a short rating of “this felt like another play
 - write scheduler events and cancellations to evaluation trace v3 while continuing to decode v1 and v2 without inventing absent history;
 - map browser events from Swift session offsets to `performance.now()`, keep stable note/source IDs, coalesce slow SSE clients, and draw recorded note correspondence rather than array-position links.
 
+### M13: shared rhythm-box ensemble
+
+- add an opt-in deterministic rhythm-box layer on a dedicated drum channel, using kick, rim click, closed hi-hat, and sparse hand percussion without copying a recorded pattern;
+- put the rhythm box on the authoritative Swift session clock from the first intro bar so it acts as the audible count-in;
+- subtract offbeats, hand percussion, and keyboard punctuation as measured human density rises;
+- generate only short, one-note modal keyboard punctuation on a separate part after a stable tonal center is available;
+- align fugue response opportunities and relative note onsets to the same adjustable swung-eighth grid while keeping all scheduling local;
+- keep human, keyboard, companion, and drum channels distinct and expose independent bounded CC7 levels for all four parts;
+- expose swing and groove intensity in the loopback browser while applying changes only to future scheduled material;
+- publish rhythm and keyboard MIDI events through the existing committed visual-event path without moving MIDI scheduling into the browser;
+- leave bank and program selection on the instrument, avoiding device-specific patch mutation;
+- preserve identical behavior when the groove is off, including existing CLI defaults and deterministic conversation tests.
+
 ## Out of scope for the early MVP
 
 - audio transcription;

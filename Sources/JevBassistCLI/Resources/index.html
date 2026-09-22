@@ -330,6 +330,7 @@
     .mix-heading { margin-bottom: 10px; }
     .mix-heading span { color: var(--muted); font-size: 11px; letter-spacing: .1em; }
     .mix-channel + .mix-channel { margin-top: 11px; }
+    [hidden] { display: none !important; }
 
     .mix-label {
       margin-bottom: 8px;
@@ -506,6 +507,30 @@
             </div>
             <input type="range" class="companion-slider" id="companionVolume" min="0" max="127" value="72" disabled aria-label="Jev companion volume">
           </div>
+          <div class="mix-channel" id="rhythmControls">
+            <div class="mix-label">
+              <span>Box <span class="channel-tag" id="drumChannel">CH —</span></span>
+              <output class="mix-value" id="drumVolumeValue">—</output>
+            </div>
+            <input type="range" id="drumVolume" min="0" max="127" value="62" disabled aria-label="Rhythm box volume">
+          </div>
+          <div class="mix-channel" id="textureControls">
+            <div class="mix-label">
+              <span>Keys <span class="channel-tag" id="textureChannel">CH —</span></span>
+              <output class="mix-value" id="textureVolumeValue">—</output>
+            </div>
+            <input type="range" id="textureVolume" min="0" max="127" value="50" disabled aria-label="Texture keys volume">
+          </div>
+          <div class="row" id="grooveControls">
+            <div class="mix-channel">
+              <div class="mix-label"><span>Swing</span><output class="mix-value" id="swingValue">—</output></div>
+              <input type="range" id="swing" min="0" max="100" value="44" disabled aria-label="Groove swing">
+            </div>
+            <div class="mix-channel">
+              <div class="mix-label"><span>Groove</span><output class="mix-value" id="grooveIntensityValue">—</output></div>
+              <input type="range" id="grooveIntensity" min="0" max="100" value="65" disabled aria-label="Groove intensity">
+            </div>
+          </div>
           <div class="mix-channel">
             <label for="audioInput">Visual audio input</label>
             <select id="audioInput" aria-label="Audio input used only for the visual field">
@@ -533,8 +558,10 @@
     const ui = Object.fromEntries([
       'visualizer','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
       'beatStrip','caption','midiInput','bpm','beats','intro','armButton','audioButton','resetButton','hint',
-      'noteReadout','footerTiming','humanChannel','companionChannel','humanVolume',
-      'companionVolume','humanVolumeValue','companionVolumeValue','audioInput'
+      'noteReadout','footerTiming','humanChannel','companionChannel','drumChannel','textureChannel',
+      'humanVolume','companionVolume','drumVolume','textureVolume','humanVolumeValue',
+      'companionVolumeValue','drumVolumeValue','textureVolumeValue','swing','swingValue',
+      'grooveIntensity','grooveIntensityValue','rhythmControls','textureControls','grooveControls','audioInput'
     ].map(id => [id, document.getElementById(id)]));
 
     const context = ui.visualizer.getContext('2d');
@@ -643,10 +670,27 @@
       ui.intro.value = next.introBars;
       ui.humanChannel.textContent = `CH ${next.humanChannel}`;
       ui.companionChannel.textContent = `CH ${next.companionChannel}`;
+      ui.drumChannel.textContent = `CH ${next.drumChannel}`;
+      ui.textureChannel.textContent = `CH ${next.textureChannel}`;
       setSlider(ui.humanVolume, ui.humanVolumeValue, next.humanVolume);
       setSlider(ui.companionVolume, ui.companionVolumeValue, next.companionVolume);
+      setSlider(ui.drumVolume, ui.drumVolumeValue, next.drumVolume);
+      setSlider(ui.textureVolume, ui.textureVolumeValue, next.textureVolume);
+      const grooveEnabled = next.groove === 'riot';
+      const swingValue = Math.round((next.swing - .5) / .18 * 100);
+      setSlider(ui.swing, ui.swingValue, Math.max(0, Math.min(100, swingValue)));
+      setSlider(ui.grooveIntensity, ui.grooveIntensityValue, Math.round(next.grooveIntensity * 100));
+      ui.swingValue.value = next.swing.toFixed(2);
+      ui.grooveIntensityValue.value = `${Math.round(next.grooveIntensity * 100)}%`;
       ui.humanVolume.disabled = next.phase === 'stopped';
       ui.companionVolume.disabled = next.phase === 'stopped';
+      ui.drumVolume.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.textureVolume.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.swing.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.grooveIntensity.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.rhythmControls.hidden = !grooveEnabled;
+      ui.textureControls.hidden = !grooveEnabled;
+      ui.grooveControls.hidden = !grooveEnabled;
       const modalLabel = next.mode ? ` · ${next.tonalCenter ?? '?'} ${next.mode}` : '';
       ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style}${modalLabel} after ${next.introBars} bars`;
       const harmony = next.nextChord
@@ -692,7 +736,9 @@
         const energy = Math.max(.15, event.velocity / 127) * performerGain(event.performer);
         visualBursts.push({
           startedAt: eventNow,
-          x: (event.performer === 'human' ? .14 : .86) * viewportWidth,
+          x: (event.performer === 'human' ? .14
+            : event.performer === 'rhythm' ? .5
+              : event.performer === 'texture' ? .68 : .86) * viewportWidth,
           y: (.15 + (1 - pitch) * .7) * viewportHeight,
           energy,
           performer: event.performer
@@ -759,7 +805,13 @@
 
     function performerGain(performer) {
       if (!state) return .5;
-      const value = performer === 'human' ? state.humanVolume : state.companionVolume;
+      const value = performer === 'human'
+        ? state.humanVolume
+        : performer === 'rhythm'
+          ? state.drumVolume
+          : performer === 'texture'
+            ? state.textureVolume
+            : state.companionVolume;
       return Math.max(.08, value / 127);
     }
 
@@ -797,12 +849,14 @@
     function disturbMembrane(event) {
       const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
       const band = Math.round((1 - pitch) * (membrane.bands - 1));
-      const x = event.performer === 'human' ? .18 : .82;
+      const x = event.performer === 'human' ? .18
+        : event.performer === 'rhythm' ? .5
+          : event.performer === 'texture' ? .68 : .82;
       const node = Math.round(x * (membrane.nodes - 1));
       const gain = performerGain(event.performer);
       const onset = event.kind === 'noteOn' && event.velocity > 0;
       const energy = Math.max(.08, event.velocity / 127) * gain * (onset ? 1 : -.22);
-      const direction = event.performer === 'human' ? 1 : -1;
+      const direction = event.performer === 'human' || event.performer === 'rhythm' ? 1 : -1;
 
       for (let bandOffset = -5; bandOffset <= 5; bandOffset++) {
         const targetBand = band + bandOffset;
@@ -827,8 +881,11 @@
       for (const note of activeNotes.values()) {
         const pitch = Math.max(0, Math.min(1, (note.note - 36) / 48));
         const band = Math.round((1 - pitch) * (membrane.bands - 1));
-        const node = Math.round((note.performer === 'human' ? .18 : .82) * (membrane.nodes - 1));
-        const direction = note.performer === 'human' ? 1 : -1;
+        const position = note.performer === 'human' ? .18
+          : note.performer === 'rhythm' ? .5
+            : note.performer === 'texture' ? .68 : .82;
+        const node = Math.round(position * (membrane.nodes - 1));
+        const direction = note.performer === 'human' || note.performer === 'rhythm' ? 1 : -1;
         const energy = note.velocity / 127 * performerGain(note.performer);
         membrane.velocities[band][node] += Math.sin(now * .002 + note.note) * energy * .009 * direction;
       }
@@ -887,7 +944,9 @@
         const progress = age / 1050;
         const alpha = Math.pow(1 - progress, 2.1) * burst.energy;
         const radius = 18 + progress * 110;
-        const color = burst.performer === 'human' ? '242,240,232' : '200,255,69';
+        const color = burst.performer === 'human' ? '242,240,232'
+          : burst.performer === 'rhythm' ? '255,166,71'
+            : burst.performer === 'texture' ? '112,221,255' : '200,255,69';
         const glow = context.createRadialGradient(
           burst.x, burst.y, 0,
           burst.x, burst.y, Math.max(1, radius)
@@ -1249,8 +1308,12 @@
     }
 
     function queueVolume(performer, value) {
-      const slider = performer === 'human' ? ui.humanVolume : ui.companionVolume;
-      const output = performer === 'human' ? ui.humanVolumeValue : ui.companionVolumeValue;
+      const slider = performer === 'human' ? ui.humanVolume
+        : performer === 'rhythm' ? ui.drumVolume
+          : performer === 'texture' ? ui.textureVolume : ui.companionVolume;
+      const output = performer === 'human' ? ui.humanVolumeValue
+        : performer === 'rhythm' ? ui.drumVolumeValue
+          : performer === 'texture' ? ui.textureVolumeValue : ui.companionVolumeValue;
       setSlider(slider, output, Number(value));
       clearTimeout(volumeTimers[performer]);
       volumeTimers[performer] = setTimeout(() => command(`volume/${performer}/${value}`), 45);
@@ -1261,6 +1324,20 @@
     ui.resetButton.addEventListener('click', () => command('stop'));
     ui.humanVolume.addEventListener('input', event => queueVolume('human', event.target.value));
     ui.companionVolume.addEventListener('input', event => queueVolume('companion', event.target.value));
+    ui.drumVolume.addEventListener('input', event => queueVolume('rhythm', event.target.value));
+    ui.textureVolume.addEventListener('input', event => queueVolume('texture', event.target.value));
+    ui.swing.addEventListener('input', event => {
+      setSlider(ui.swing, ui.swingValue, Number(event.target.value));
+      ui.swingValue.value = (0.5 + Number(event.target.value) / 100 * 0.18).toFixed(2);
+      clearTimeout(volumeTimers.swing);
+      volumeTimers.swing = setTimeout(() => command(`groove/swing/${event.target.value}`), 45);
+    });
+    ui.grooveIntensity.addEventListener('input', event => {
+      setSlider(ui.grooveIntensity, ui.grooveIntensityValue, Number(event.target.value));
+      ui.grooveIntensityValue.value = `${event.target.value}%`;
+      clearTimeout(volumeTimers.groove);
+      volumeTimers.groove = setTimeout(() => command(`groove/intensity/${event.target.value}`), 45);
+    });
     ui.audioInput.addEventListener('change', () => {
       if (audioStream) toggleAudio(true);
     });

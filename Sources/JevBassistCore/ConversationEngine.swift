@@ -1051,6 +1051,7 @@ public struct ConversationEngine: Sendable {
     public let musicalStateConfiguration: MusicalStateConfiguration
     public let mode: MusicalMode
     public let outputChannel: UInt8
+    public private(set) var grooveTiming: GrooveTiming?
 
     private let generator = ResponseCandidateGenerator()
     private let arbiter = ResponseArbiter()
@@ -1082,11 +1083,13 @@ public struct ConversationEngine: Sendable {
         musicalStateConfiguration: MusicalStateConfiguration,
         mode: MusicalMode,
         outputChannel: UInt8,
+        grooveTiming: GrooveTiming? = nil,
         decisionProvider: any ConversationDecisionProvider = LocalConversationDecisionProvider()
     ) {
         self.musicalStateConfiguration = musicalStateConfiguration
         self.mode = mode
         self.outputChannel = outputChannel
+        self.grooveTiming = grooveTiming
         self.decisionProvider = decisionProvider
     }
 
@@ -1213,6 +1216,10 @@ public struct ConversationEngine: Sendable {
         turnState = .overlapping
     }
 
+    public mutating func setGrooveTiming(_ timing: GrooveTiming?) {
+        grooveTiming = timing
+    }
+
     public mutating func observeHumanGesture(_ observation: PhraseObservation) {
         guard !observation.notes.isEmpty else { return }
         if observation.simultaneousNoteGroups.contains(where: { $0.count > 1 }) {
@@ -1317,7 +1324,7 @@ public struct ConversationEngine: Sendable {
             sharedTheme: developmentSource,
             pitchContext: pitchContext,
             previousResponse: previousResponseNotes
-        )
+        ).map(applyingGroove)
         guard let selected = arbiter.choose(from: candidates, context: developmentContext) else {
             return nil
         }
@@ -1469,7 +1476,8 @@ public struct ConversationEngine: Sendable {
         let selected = candidates.first { $0.relationship == .fragmentation }
             ?? candidates.first { $0.relationship == .tailVariation }
             ?? candidates.first { $0.relationship == .hold }
-        guard let selected else { return nil }
+        guard let rawSelection = selected else { return nil }
+        let selected = applyingGroove(to: rawSelection)
         spontaneousProposalUsed = true
         currentIntent = .question
         turnState = .preparing
@@ -1659,9 +1667,39 @@ public struct ConversationEngine: Sendable {
     private func responseOpportunity(after offset: UInt64) -> UInt64 {
         let minimum = offset.addingReportingOverflow(80_000)
         let safeMinimum = minimum.overflow ? UInt64.max : minimum.partialValue
-        let subdivision = beatMicroseconds * 0.5
-        let index = ceil(Double(safeMinimum) / subdivision)
-        return UInt64(min(Double(UInt64.max), (index * subdivision).rounded()))
+        guard let grooveTiming else {
+            let subdivision = beatMicroseconds * 0.5
+            let index = ceil(Double(safeMinimum) / subdivision)
+            return UInt64(min(Double(UInt64.max), (index * subdivision).rounded()))
+        }
+        let beat = Double(safeMinimum) / beatMicroseconds
+        let opportunity = grooveTiming.nextOpportunity(after: beat, minimumLeadBeats: 0)
+        return UInt64(min(Double(UInt64.max), (opportunity * beatMicroseconds).rounded()))
+    }
+
+    private func applyingGroove(
+        to candidate: ConversationResponseCandidate
+    ) -> ConversationResponseCandidate {
+        guard let grooveTiming, candidate.notes.count > 1 else { return candidate }
+        var previous = -Double.infinity
+        let notes = candidate.notes.map { note in
+            var onset = grooveTiming.alignedBeat(note.relativeOnsetBeats)
+            onset = max(onset, previous + 0.08)
+            previous = onset
+            return ConversationResponseNote(
+                sourceNoteID: note.sourceNoteID,
+                note: note.note,
+                velocity: note.velocity,
+                relativeOnsetBeats: onset,
+                durationBeats: note.durationBeats
+            )
+        }
+        return ConversationResponseCandidate(
+            id: candidate.id,
+            relationship: candidate.relationship,
+            notes: notes,
+            score: candidate.score
+        )
     }
 
     private func decision(for relationship: ConversationRelationship) -> BassDecision {

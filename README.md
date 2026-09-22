@@ -30,6 +30,7 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - render the same bounded decisions as one quiet, sustained ambient voicing per bar;
 - remember a human motif and return a delayed, locally transformed trace that fades over two silent bars;
 - preserve a short human subject through context-selected answers and an explicit return;
+- add an optional dry rhythm-box pulse and clipped keyboard punctuation that share Jev's swing grid;
 - mix the human and companion parts independently with MIDI Channel Volume controls;
 - render both MIDI performances as one strongly reactive, beat-synchronized membrane;
 - flush pending output and silence the selected channel when a live session stops.
@@ -201,6 +202,37 @@ With `--brain jev`, one request is made per completed phrase and Jev may select 
 
 `--human-volume` and `--companion-volume` accept MIDI values from 0 to 127 and default to 100 and 72. They send Channel Volume (CC7) to the input and output part channels, so the parts must use different MIDI channels for independent control. If both channel options are the same, the two GUI controls are linked because one MIDI part cannot have two CC7 values.
 
+## Add the dry rhythm-box ensemble
+
+`--groove riot` adds a deliberately spare, early-drum-machine-inspired pulse: kick, rim click, closed hi-hat, occasional hand percussion, and short modal keyboard punctuation. It is an original deterministic pattern, not a transcription of a recorded song. Human activity controls subtraction: denser playing removes offbeat percussion and the keyboard part instead of making the backing busier. Jev's fugue responses use the same swung eighth-note grid, so the click and the answer feel like one band.
+
+The default channels match the four JD-Xi parts: **You** on Digital Synth 1 / CH1, **Keys** on Digital Synth 2 / CH2, **Jev** on Analog Synth / CH3, and **Box** on Drums / CH10. Select a clipped organ, clavinet, or dry electric-key patch for CH2; a short analog bass for CH3; and a compact dry drum kit for CH10. The application does not send bank or program changes, so it never overwrites your JD-Xi sound choices.
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 96 \
+  --input-channel 1 \
+  --texture-channel 2 \
+  --output-channel 3 \
+  --drum-channel 10 \
+  --style fugue \
+  --mode dorian \
+  --brain jev \
+  --intro-bars 2 \
+  --groove riot \
+  --swing 0.58 \
+  --groove-intensity 0.65 \
+  --human-volume 100 \
+  --texture-volume 50 \
+  --companion-volume 72 \
+  --drum-volume 62 \
+  --ui
+```
+
+The four channels must be different when the groove is enabled. **Swing** accepts `0.50...0.68`; `0.50` is straight and the default `0.58` is a relaxed long-short subdivision. **Groove intensity** accepts `0...1`; zero is silent. The browser exposes live **Box**, **Keys**, **Swing**, and **Groove** controls beside the existing human and Jev mix. The rhythm box begins with the shared clock, including the intro, so it also supplies the requested count and pulse before Jev enters.
+
 ## Open the shared beat display
 
 Add `--ui` to `jam`:
@@ -220,7 +252,7 @@ swift run jev-bassist jam \
 
 The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Click **Start** on the downbeat. That single action starts the Swift/CoreMIDI bar clock and the browser display together; the browser does not open MIDI itself and does not run a second independent clock. **Stop** ends the live process safely. You can also press `Return` in Terminal.
 
-The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. The visual field combines a restrained membrane with phrase trajectories derived from the same motif data used by the conversation engine. A captured human line remains in white; companion events are revealed in green when handed to the output, while only notes whose scheduled onset has elapsed become conversation memory. Source-response links use stable source-note IDs, so fragmentation does not falsely connect unrelated positions. Sequence, modal inversion, fragmentation, augmentation, and return change the spacing, direction, density, and convergence of one shared family of curves rather than spawning symbolic polygons. Velocity and channel volume control local energy. In memory and fugue modes the engine publishes four slow expression values: remembered strength controls coupling, tension changes stiffness, activity changes line weight, and resonance controls damping and afterimage length.
+The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. With the rhythm box enabled, **Box** and **Keys** control CH10 and CH2 independently, while **Swing** and **Groove** affect future scheduled bars. The visual field combines a restrained membrane with phrase trajectories derived from the same motif data used by the conversation engine. A captured human line remains in white; companion events are revealed in green, rhythm events in amber, and keyboard punctuation in cyan when handed to the output. Only notes whose scheduled onset has elapsed become conversation memory. Source-response links use stable source-note IDs, so fragmentation does not falsely connect unrelated positions. Sequence, modal inversion, fragmentation, augmentation, and return change the spacing, direction, density, and convergence of one shared family of curves rather than spawning symbolic polygons. Velocity and channel volume control local energy. In memory and fugue modes the engine publishes four slow expression values: remembered strength controls coupling, tension changes stiffness, activity changes line weight, and resonance controls damping and afterimage length.
 
 MIDI alone is sufficient for the phrase geometry. The optional **Visual audio input** selector analyzes energy and spectral brightness inside the browser; select the UR22mkII loopback/mix route if the field should follow the combined audible session. The default laptop microphone is not assumed to contain that mix, and no audio is sent to the Swift process or a remote service.
 

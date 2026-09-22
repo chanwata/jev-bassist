@@ -52,8 +52,15 @@ struct JamWebState: Codable, Sendable {
     let lastNote: String?
     let humanChannel: UInt8
     let companionChannel: UInt8
+    let drumChannel: UInt8
+    let textureChannel: UInt8
     let humanVolume: UInt8
     let companionVolume: UInt8
+    let drumVolume: UInt8
+    let textureVolume: UInt8
+    let groove: String
+    let swing: Double
+    let grooveIntensity: Double
     let expressionMemory: Double
     let expressionTension: Double
     let expressionActivity: Double
@@ -65,6 +72,10 @@ protocol JamWebControlling: AnyObject, Sendable {
     func startClockFromWeb()
     func setHumanVolumeFromWeb(_ value: UInt8)
     func setCompanionVolumeFromWeb(_ value: UInt8)
+    func setDrumVolumeFromWeb(_ value: UInt8)
+    func setTextureVolumeFromWeb(_ value: UInt8)
+    func setSwingFromWeb(_ value: UInt8)
+    func setGrooveIntensityFromWeb(_ value: UInt8)
 }
 
 /// A loopback-only HTTP/SSE bridge. It never handles MIDI inside a Network
@@ -187,11 +198,31 @@ final class JamWebServer: @unchecked Sendable {
                 controller?.setHumanVolumeFromWeb(volume.value)
             case "companion":
                 controller?.setCompanionVolumeFromWeb(volume.value)
+            case "rhythm":
+                controller?.setDrumVolumeFromWeb(volume.value)
+            case "texture":
+                controller?.setTextureVolumeFromWeb(volume.value)
             default:
                 respond(status: "404 Not Found", body: Data(), connection: connection)
                 return
             }
             respond(status: "202 Accepted", body: Data("mixing".utf8), connection: connection)
+            return
+        }
+
+        if method == "POST", let groove = Self.grooveCommand(path: path) {
+            guard isTrustedBrowserRequest(request) else {
+                respond(status: "403 Forbidden", body: Data(), connection: connection)
+                return
+            }
+            switch groove.control {
+            case "swing": controller?.setSwingFromWeb(groove.value)
+            case "intensity": controller?.setGrooveIntensityFromWeb(groove.value)
+            default:
+                respond(status: "404 Not Found", body: Data(), connection: connection)
+                return
+            }
+            respond(status: "202 Accepted", body: Data("grooving".utf8), connection: connection)
             return
         }
 
@@ -229,6 +260,15 @@ final class JamWebServer: @unchecked Sendable {
               value <= 127 else {
             return nil
         }
+        return (String(parts[2]), value)
+    }
+
+    private static func grooveCommand(path: String) -> (control: String, value: UInt8)? {
+        let parts = path.split(separator: "/")
+        guard parts.count == 4,
+              parts[0] == "api",
+              parts[1] == "groove",
+              let value = UInt8(parts[3]), value <= 100 else { return nil }
         return (String(parts[2]), value)
     }
 
