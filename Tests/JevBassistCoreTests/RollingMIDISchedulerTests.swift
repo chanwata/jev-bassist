@@ -75,6 +75,30 @@ final class RollingMIDISchedulerTests: XCTestCase {
         XCTAssertTrue(try scheduler.drain(through: 1_000_000).isEmpty)
     }
 
+    func testAssignsStableNoteOnIndicesBeforeRollingCommitment() throws {
+        var scheduler = try RollingMIDIScheduler(horizonMicroseconds: 50_000)
+        scheduler.submit([
+            message(.noteOn, note: 60, at: 100_000),
+            message(.noteOff, note: 60, at: 160_000),
+            message(.noteOn, note: 64, at: 300_000),
+            message(.noteOff, note: 64, at: 360_000),
+            message(.noteOn, note: 67, at: 500_000),
+            message(.noteOff, note: 67, at: 560_000)
+        ])
+
+        let first = try scheduler.drain(through: 110_000)
+        _ = scheduler.yieldToHuman(at: 400_000)
+        let remaining = try scheduler.drain(through: 1_000_000)
+
+        XCTAssertEqual(first.filter { $0.message.kind == .noteOn }.map(\.noteOnIndex), [0])
+        XCTAssertEqual(remaining.filter { $0.message.kind == .noteOn }.map(\.noteOnIndex), [1])
+        XCTAssertTrue(
+            (first + remaining)
+                .filter { $0.message.kind == .noteOff }
+                .allSatisfy { $0.noteOnIndex == nil }
+        )
+    }
+
     private func message(
         _ kind: ScheduledMIDIMessageKind,
         note: UInt8,

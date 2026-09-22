@@ -237,6 +237,20 @@ The primary human evaluation is a short rating of “this felt like another play
 - leave bank and program selection on the instrument, avoiding device-specific patch mutation;
 - preserve identical behavior when the groove is off, including existing CLI defaults and deterministic conversation tests.
 
+### M14: shared engraved performance surface
+
+- replace the membrane, per-note glow, left/right performer split, and decorative correspondence lines with one large shared surface;
+- derive human and companion contours from actual pitch, onset, duration, and rest geometry in one common coordinate system;
+- identify every sounded companion attack by its explicit response-note index so packet loss, cancellation, or reconnection cannot reveal the wrong prefix;
+- restore retained phrase geometry after reconnection without replaying old transient attacks, while keeping visual history bounded to 256 events and eight phrase forms;
+- make kick compress the surface, rim click shear it, hi-hat incise it briefly, and keyboard punctuation create only local interference;
+- use optional local audio energy and spectral brightness for line texture and decay, without claiming pitch, reverb, or lineage inference;
+- expire phrase memory in tempo-relative beats, keep percussion transients short in milliseconds, and preserve existing cancellation semantics;
+- expose a browser-local -120...+120 ms visual timing adjustment for instrument and monitoring latency;
+- honor reduced-motion preferences while preserving the recognizable phrase relationship;
+- provide a deterministic browser-only visual demo and run it in CI with mocked canvas and clock state;
+- keep the Start action visible while ready and remove performance controls from the foreground after the session begins.
+
 ## Out of scope for the early MVP
 
 - audio transcription;

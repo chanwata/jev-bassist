@@ -1234,7 +1234,12 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                     sessionOffsetMicroseconds: message.offsetMicroseconds
                         + Self.outputSafetyOffsetMicroseconds,
                     noteID: event.noteID,
-                    lineage: schedulerLineage[event.revision]
+                    responseNoteIndex: schedulerLineage[event.revision] == nil
+                        ? nil
+                        : event.noteOnIndex,
+                    lineage: message.kind == .noteOn
+                        ? schedulerLineage[event.revision]
+                        : nil
                 )
             }
             publishState(elapsedMicroseconds: currentOffsetMicroseconds)
@@ -1350,6 +1355,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         velocity: UInt8,
         sessionOffsetMicroseconds: UInt64,
         noteID: UInt64? = nil,
+        responseNoteIndex: Int? = nil,
         lineage: ConversationLineage? = nil
     ) {
         guard let startedAt else {
@@ -1360,6 +1366,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 sessionID: sessionID,
                 id: nextVisualEventID,
                 noteID: noteID,
+                responseNoteIndex: responseNoteIndex,
                 performer: performer,
                 kind: kind,
                 note: note,
@@ -1383,8 +1390,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             )
         )
         nextVisualEventID += 1
-        if visualEvents.count > 64 {
-            visualEvents.removeFirst(visualEvents.count - 64)
+        if visualEvents.count > 256 {
+            visualEvents.removeFirst(visualEvents.count - 256)
         }
     }
 

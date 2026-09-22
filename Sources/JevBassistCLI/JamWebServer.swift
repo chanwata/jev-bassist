@@ -7,6 +7,7 @@ struct JamVisualEvent: Codable, Sendable {
     let sessionID: String
     let id: UInt64
     let noteID: UInt64?
+    let responseNoteIndex: Int?
     let performer: String
     let kind: String
     let note: UInt8
@@ -188,7 +189,9 @@ final class JamWebServer: @unchecked Sendable {
 
         let method = String(parts[0])
         let path = String(parts[1])
-        if method == "POST", let volume = Self.volumeCommand(path: path) {
+        let routePath = path.split(separator: "?", maxSplits: 1).first
+            .map(String.init) ?? path
+        if method == "POST", let volume = Self.volumeCommand(path: routePath) {
             guard isTrustedBrowserRequest(request) else {
                 respond(status: "403 Forbidden", body: Data(), connection: connection)
                 return
@@ -210,7 +213,7 @@ final class JamWebServer: @unchecked Sendable {
             return
         }
 
-        if method == "POST", let groove = Self.grooveCommand(path: path) {
+        if method == "POST", let groove = Self.grooveCommand(path: routePath) {
             guard isTrustedBrowserRequest(request) else {
                 respond(status: "403 Forbidden", body: Data(), connection: connection)
                 return
@@ -226,7 +229,7 @@ final class JamWebServer: @unchecked Sendable {
             return
         }
 
-        switch (method, path) {
+        switch (method, routePath) {
         case ("GET", "/"):
             respond(status: "200 OK", contentType: "text/html; charset=utf-8", body: html, connection: connection)
         case ("GET", "/events"):
