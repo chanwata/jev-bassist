@@ -33,6 +33,25 @@ public struct GrooveTiming: Codable, Equatable, Sendable {
         }
         return quarter + 1
     }
+
+    /// A finer, still swung grid for conversational entrances. The rhythm box
+    /// keeps its sparse eighth-note skeleton, while a reply may enter between
+    /// those attacks instead of waiting an entire long or short subdivision.
+    public func nextConversationOpportunity(
+        after beat: Double,
+        minimumLeadBeats: Double
+    ) -> Double {
+        let threshold = beat + max(0, minimumLeadBeats)
+        let quarter = floor(threshold)
+        let candidates = [
+            quarter,
+            quarter + swing * 0.5,
+            quarter + swing,
+            quarter + (1 + swing) * 0.5,
+            quarter + 1
+        ]
+        return candidates.first(where: { $0 >= threshold }) ?? quarter + 1
+    }
 }
 
 public struct RiotGroovePlan: Equatable, Sendable {

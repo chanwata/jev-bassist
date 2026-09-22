@@ -7,13 +7,13 @@
   <style>
     :root {
       color-scheme: dark;
-      --ink: #f2f0e8;
-      --muted: #85877f;
+      --ink: #f4f7fb;
+      --muted: #79828e;
       --panel: rgba(14, 15, 14, .78);
       --line: rgba(242, 240, 232, .13);
-      --acid: #c8ff45;
-      --acid-soft: rgba(200, 255, 69, .15);
-      --orange: #ff785a;
+      --acid: #5ce1ff;
+      --acid-soft: rgba(92, 225, 255, .14);
+      --orange: #ff365e;
     }
 
     * { box-sizing: border-box; }
@@ -22,7 +22,7 @@
     body {
       margin: 0;
       overflow-x: hidden;
-      background: #080908;
+      background: #030507;
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
       letter-spacing: -.015em;
@@ -33,7 +33,7 @@
       inset: 0;
       content: "";
       pointer-events: none;
-      background: radial-gradient(circle at 50% 50%, transparent 0, rgba(0,0,0,.32) 75%);
+      background: radial-gradient(circle at 50% 46%, transparent 0, rgba(0,0,0,.52) 82%);
       z-index: 1;
     }
 
@@ -1070,39 +1070,6 @@
         }));
       }
 
-      function strokeGesture(points, options) {
-        if (!points.length) return;
-        const {offset = 0, alpha = 1, width = 1, color = '242,240,232', gap = false} = options;
-        drawingContext.strokeStyle = `rgba(${color},${alpha})`;
-        drawingContext.lineWidth = width;
-        drawingContext.beginPath();
-        drawingContext.moveTo(points[0].x, points[0].y + offset);
-        for (let index = 1; index < points.length; index++) {
-          const previous = points[index - 1];
-          const point = points[index];
-          if (gap && point.x - previous.x > Math.max(80, previous.duration * 2.4)) {
-            drawingContext.moveTo(point.x, point.y + offset);
-            continue;
-          }
-          const controlX = previous.x + (point.x - previous.x) * .56;
-          drawingContext.bezierCurveTo(
-            controlX, previous.y + offset,
-            controlX, point.y + offset,
-            point.x, point.y + offset
-          );
-        }
-        drawingContext.stroke();
-        for (const point of points) {
-          if (point.duration < 2) continue;
-          drawingContext.globalAlpha = alpha * (.18 + point.intensity * .18);
-          drawingContext.beginPath();
-          drawingContext.moveTo(point.x, point.y + offset);
-          drawingContext.lineTo(point.x + point.duration, point.y + offset);
-          drawingContext.stroke();
-        }
-        drawingContext.globalAlpha = 1;
-      }
-
       function impactState(now) {
         let compression = 0;
         let shear = 0;
@@ -1141,16 +1108,107 @@
         });
       }
 
+      function drawKineticGrid(frame, rhythm) {
+        const {width, height, beatProgress, absoluteBeat} = frame;
+        const reduced = reducedMotionQuery.matches;
+        const horizon = height * (.53 + rhythm.shear * .018);
+        const center = width * (.5 + rhythm.shear * .025);
+        const contraction = 1 - rhythm.compression * .09;
+        drawingContext.save();
+        drawingContext.globalCompositeOperation = 'screen';
+        drawingContext.strokeStyle = 'rgba(124,151,168,.075)';
+        drawingContext.lineWidth = .55;
+        const rays = reduced ? 9 : 17;
+        for (let index = 0; index < rays; index++) {
+          const targetX = width * (index / (rays - 1));
+          drawingContext.beginPath();
+          drawingContext.moveTo(center, horizon);
+          drawingContext.lineTo(
+            center + (targetX - center) * contraction,
+            height * .93
+          );
+          drawingContext.stroke();
+        }
+        const rows = reduced ? 5 : 10;
+        for (let row = 0; row < rows; row++) {
+          const normalized = row / Math.max(1, rows - 1);
+          const y = horizon + Math.pow(normalized, 1.72) * height * .4;
+          drawingContext.strokeStyle = `rgba(124,151,168,${.035 + normalized * .055})`;
+          drawingContext.beginPath();
+          drawingContext.moveTo(width * .04, y);
+          drawingContext.lineTo(width * .96, y);
+          drawingContext.stroke();
+        }
+        const scanX = width * (.08 + beatProgress * .84);
+        const downbeat = Number.isFinite(absoluteBeat) && absoluteBeat % 4 === 0;
+        drawingContext.strokeStyle = downbeat
+          ? 'rgba(255,54,94,.22)'
+          : 'rgba(92,225,255,.16)';
+        drawingContext.lineWidth = .7 + frame.audioEnergy * .9;
+        drawingContext.beginPath();
+        drawingContext.moveTo(scanX, height * .08);
+        drawingContext.lineTo(scanX, height * .92);
+        drawingContext.stroke();
+        drawingContext.restore();
+      }
+
+      function drawPrecisionTrace(points, options = {}) {
+        if (!points.length) return;
+        const {
+          alpha = 1,
+          color = '244,247,251',
+          width = 1,
+          offsetX = 0,
+          offsetY = 0,
+          nodes = true,
+          stems = true
+        } = options;
+        drawingContext.strokeStyle = `rgba(${color},${alpha})`;
+        drawingContext.fillStyle = `rgba(${color},${Math.min(1, alpha * 1.4)})`;
+        drawingContext.lineWidth = width;
+        drawingContext.beginPath();
+        drawingContext.moveTo(points[0].x + offsetX, points[0].y + offsetY);
+        for (let index = 1; index < points.length; index++) {
+          const previous = points[index - 1];
+          const point = points[index];
+          const middle = previous.x + (point.x - previous.x) * .62;
+          drawingContext.lineTo(middle + offsetX, previous.y + offsetY);
+          drawingContext.lineTo(point.x + offsetX, point.y + offsetY);
+        }
+        drawingContext.stroke();
+        for (const point of points) {
+          const x = point.x + offsetX;
+          const y = point.y + offsetY;
+          if (stems) {
+            drawingContext.globalAlpha = alpha * .32;
+            drawingContext.beginPath();
+            drawingContext.moveTo(x, y - 13 - point.intensity * 12);
+            drawingContext.lineTo(x, y + 13 + point.intensity * 12);
+            drawingContext.stroke();
+          }
+          if (nodes) {
+            drawingContext.globalAlpha = alpha;
+            drawingContext.beginPath();
+            drawingContext.arc(x, y, 1.4 + point.intensity * 1.2, 0, Math.PI * 2);
+            drawingContext.fill();
+          }
+        }
+        drawingContext.globalAlpha = 1;
+      }
+
       function drawIncisions(rhythm, width, height) {
         for (const incision of rhythm.incisions) {
           const position = ((incision.phase * .001618) % 1 + 1) % 1;
           const x = width * (.12 + position * .76);
-          drawingContext.strokeStyle = `rgba(242,240,232,${incision.envelope * .2})`;
-          drawingContext.lineWidth = .5;
+          drawingContext.strokeStyle = `rgba(244,247,251,${incision.envelope * .46})`;
+          drawingContext.lineWidth = .65;
           drawingContext.beginPath();
           drawingContext.moveTo(x, height * .18);
           drawingContext.lineTo(x, height * .82);
           drawingContext.stroke();
+          drawingContext.fillStyle = `rgba(244,247,251,${incision.envelope * .32})`;
+          drawingContext.fillRect(x - 8, height * .18, 16, 1);
+          drawingContext.fillRect(x - 5, height * .82, 10, 1);
         }
       }
 
@@ -1163,25 +1221,32 @@
             continue;
           }
           const progress = age / 1300;
-          const alpha = Math.pow(1 - progress, 2) * texture.energy * .24;
+          const alpha = Math.pow(1 - progress, 2) * texture.energy * .55;
           const y = height * (.72 - Math.max(0, Math.min(1, (texture.note - 48) / 24)) * .42);
           const spread = (reducedMotion ? 12 : 24) + progress * (reducedMotion ? 15 : 65);
           drawingContext.save();
-          drawingContext.strokeStyle = `rgba(242,240,232,${alpha})`;
-          drawingContext.lineWidth = .45 + audioBrightness * .45;
-          for (let line = -5; line <= 5; line++) {
+          const x = width * (.18 + ((texture.note * .037) % .64));
+          drawingContext.strokeStyle = `rgba(92,225,255,${alpha})`;
+          drawingContext.lineWidth = .55 + audioBrightness * .65;
+          for (let line = -2; line <= 2; line++) {
             drawingContext.beginPath();
             drawingContext.ellipse(
-              width * .5,
-              y + line * 2.4,
-              spread * (1 + Math.abs(line) * .08),
-              5 + spread * .13,
+              x,
+              y,
+              spread * (1 + Math.abs(line) * .16),
+              spread * (.32 + Math.abs(line) * .04),
               0,
               0,
               Math.PI * 2
             );
             drawingContext.stroke();
           }
+          drawingContext.beginPath();
+          drawingContext.moveTo(x - spread * 1.45, y);
+          drawingContext.lineTo(x + spread * 1.45, y);
+          drawingContext.moveTo(x, y - spread * .72);
+          drawingContext.lineTo(x, y + spread * .72);
+          drawingContext.stroke();
           drawingContext.restore();
         }
       }
@@ -1206,43 +1271,67 @@
         const life = phraseLifeMilliseconds(frame.state, phrase);
         const fadeStart = phrase.cancelledAt ?? phrase.lastAt;
         const fade = Math.max(0, 1 - (frame.now - fadeStart) / life);
-        const layers = reducedMotion ? 9 : 21;
-        const plateDepth = frame.height * (.11 + expression('expressionMemory', 0) * .055);
-        const lineWidth = .48 + frame.audioEnergy * .75;
+        const memory = expression('expressionMemory', 0);
+        const lineWidth = .75 + frame.audioEnergy * 1.25;
 
         drawingContext.save();
         drawingContext.globalCompositeOperation = 'screen';
-        for (let layer = 0; layer < layers; layer++) {
-          const centered = layer - (layers - 1) / 2;
-          const offset = centered / Math.max(1, layers - 1) * plateDepth;
-          const centrality = 1 - Math.abs(centered) / Math.max(1, layers / 2);
-          strokeGesture(sourcePoints, {
-            offset,
-            alpha: fade * (.025 + centrality * .055),
-            width: lineWidth,
-            gap: true
+        const sourceLayers = reducedMotion ? 1 : 3;
+        for (let layer = sourceLayers; layer > 0; layer--) {
+          drawPrecisionTrace(sourcePoints, {
+            alpha: fade * (.08 + layer * .055),
+            width: .5 + frame.audioEnergy * .55,
+            offsetY: (layer - 2) * (4 + memory * 3),
+            nodes: layer === 1,
+            stems: layer === 1
           });
         }
-        strokeGesture(sourcePoints, {
-          alpha: fade * .52,
-          width: .75 + frame.audioEnergy,
-          gap: true
-        });
-        for (let layer = 0; layer < Math.max(5, Math.floor(layers * .55)); layer++) {
-          const centered = layer - (Math.max(5, Math.floor(layers * .55)) - 1) / 2;
-          strokeGesture(responsePoints, {
-            offset: centered * 2.2,
-            alpha: fade * (.04 + (1 - Math.abs(centered) / 7) * .11),
-            width: .65 + phrase.energy * 1.15 + frame.audioEnergy * .5,
-            color: phrase.relationship === 'originalReturn' ? '242,240,232' : '200,255,69',
-            gap: phrase.relationship === 'fragmentation'
+        for (let index = 0; index < Math.min(sourcePoints.length, responsePoints.length); index++) {
+          const human = sourcePoints[index];
+          const jev = responsePoints[index];
+          drawingContext.strokeStyle = `rgba(92,225,255,${fade * .105})`;
+          drawingContext.lineWidth = .45;
+          drawingContext.beginPath();
+          drawingContext.moveTo(human.x, human.y);
+          drawingContext.lineTo(jev.x, jev.y);
+          drawingContext.stroke();
+        }
+        const responseColor = phrase.relationship === 'originalReturn'
+          ? '244,247,251'
+          : '92,225,255';
+        const echoes = reducedMotion ? 1 : 5;
+        for (let layer = echoes; layer >= 0; layer--) {
+          const depth = layer / Math.max(1, echoes);
+          drawPrecisionTrace(responsePoints, {
+            alpha: fade * (layer === 0 ? .9 : .035 + (1 - depth) * .08),
+            color: responseColor,
+            width: layer === 0 ? lineWidth + phrase.energy * 1.35 : .55,
+            offsetX: -layer * (3 + memory * 5),
+            offsetY: layer * 2.2,
+            nodes: layer === 0,
+            stems: layer === 0
           });
         }
         if (responsePoints.length) {
           const head = responsePoints[responsePoints.length - 1];
-          drawingContext.fillStyle = `rgba(200,255,69,${fade * .7})`;
+          const attackAge = Math.max(0, frame.now - phrase.lastAt);
+          const pulse = Math.min(1, attackAge / 520);
+          drawingContext.strokeStyle = `rgba(92,225,255,${fade * (1 - pulse) * .8})`;
+          drawingContext.lineWidth = .7;
           drawingContext.beginPath();
-          drawingContext.arc(head.x, head.y, 1.5 + phrase.energy * 2.5, 0, Math.PI * 2);
+          drawingContext.ellipse(
+            head.x,
+            head.y,
+            5 + pulse * 34,
+            5 + pulse * 18,
+            0,
+            0,
+            Math.PI * 2
+          );
+          drawingContext.stroke();
+          drawingContext.fillStyle = `rgba(92,225,255,${fade * .96})`;
+          drawingContext.beginPath();
+          drawingContext.arc(head.x, head.y, 2 + phrase.energy * 3.5, 0, Math.PI * 2);
           drawingContext.fill();
         }
         drawingContext.restore();
@@ -1260,24 +1349,27 @@
         );
         drawingContext.save();
         drawingContext.globalCompositeOperation = 'screen';
-        for (let offset = -7; offset <= 7; offset++) {
-          strokeGesture(shaped, {
-            offset: offset * 2.2,
-            alpha: .018 + (7 - Math.abs(offset)) * .009,
-            width: .55 + frame.audioEnergy * .5,
-            gap: true
+        const layers = reducedMotionQuery.matches ? 1 : 4;
+        for (let layer = layers; layer >= 0; layer--) {
+          drawPrecisionTrace(shaped, {
+            alpha: layer === 0 ? .78 : .035 + (layers - layer) * .025,
+            width: layer === 0 ? 1 + frame.audioEnergy * 1.3 : .5,
+            offsetX: layer * 3,
+            offsetY: -layer * 2,
+            nodes: layer === 0,
+            stems: layer === 0
           });
         }
-        strokeGesture(shaped, {alpha: .42, width: .8 + frame.audioEnergy, gap: true});
         drawingContext.restore();
       }
 
       function draw(frame) {
         if (!frame.width || !frame.height) return;
         const resonance = Math.max(expression('expressionResonance', .2), frame.audioEnergy * .75);
-        drawingContext.fillStyle = `rgba(8,9,8,${.16 - resonance * .07})`;
+        drawingContext.fillStyle = `rgba(3,5,7,${.27 - resonance * .09})`;
         drawingContext.fillRect(0, 0, frame.width, frame.height);
         const rhythm = impactState(frame.now);
+        drawKineticGrid(frame, rhythm);
         drawIncisions(rhythm, frame.width, frame.height);
         drawLiveHuman(frame.now, rhythm, frame);
 

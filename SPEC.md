@@ -218,7 +218,7 @@ The primary human evaluation is a short rating of “this felt like another play
 - keep an immutable origin and a separately revisable shared theme, requiring repeated or sufficiently strong evidence before replacing the theme;
 - choose an explicit intent—acknowledge, continue, question, support, settle, or wait—before selecting a locally safe response;
 - permit at most one short autonomous continuation after a reply, then wait instead of allowing a machine-only chain;
-- reserve a half-beat response opportunity and derive the Jev deadline from it; a timeout uses the local candidate at the same onset;
+- reserve the next fine straight or swung response opportunity with a bounded scheduling lead and derive the Jev deadline from it; a timeout uses the local candidate at the same onset;
 - preserve already elapsed response notes when a later phrase replaces an unsent suffix, including paired releases already handed to CoreMIDI;
 - send Jev bounded conversation state and candidate IDs while retaining pitch, rhythm, mode, register, timing, and MIDI safety locally;
 - write scheduler events and cancellations to evaluation trace v3 while continuing to decode v1 and v2 without inventing absent history;
@@ -230,7 +230,7 @@ The primary human evaluation is a short rating of “this felt like another play
 - put the rhythm box on the authoritative Swift session clock from the first intro bar so it acts as the audible count-in;
 - subtract offbeats, hand percussion, and keyboard punctuation as measured human density rises;
 - generate only short, one-note modal keyboard punctuation on a separate part after a stable tonal center is available;
-- align fugue response opportunities and relative note onsets to the same adjustable swung-eighth grid while keeping all scheduling local;
+- align fugue note shapes to the adjustable swing while allowing entrances on its finer subdivisions, keeping all scheduling local;
 - keep human, keyboard, companion, and drum channels distinct and expose independent bounded CC7 levels for all four parts;
 - expose swing and groove intensity in the loopback browser while applying changes only to future scheduled material;
 - publish rhythm and keyboard MIDI events through the existing committed visual-event path without moving MIDI scheduling into the browser;
@@ -250,6 +250,16 @@ The primary human evaluation is a short rating of “this felt like another play
 - honor reduced-motion preferences while preserving the recognizable phrase relationship;
 - provide a deterministic browser-only visual demo and run it in CI with mocked canvas and clock state;
 - keep the Start action visible while ready and remove performance controls from the foreground after the session begins.
+
+### M15: kinetic score and low-latency reply
+
+- replace the soft layered plate aesthetic with a restrained black, white, cyan, and signal-red kinetic score built from precision traces, correspondence vectors, scan pulses, and a beat-driven perspective grid;
+- make spatial motion follow committed pitch/time lineage, shared clock phase, drum role, keyboard pitch, and optional local audio energy rather than an unrelated decorative simulation;
+- keep human and companion identity distinct while drawing both in one coordinate system and preserving exact sounded-prefix, cancellation, reconnect, and reduced-motion behavior;
+- shorten adaptive phrase-release detection from 0.5–1.5 beats to 0.4–1.25 beats without splitting an established phrase across an ordinary articulation gap;
+- reserve only 60 ms of response scheduling lead and use quarter-beat or fine swung entry opportunities instead of waiting for a full eighth-note grid location;
+- retain local deterministic fallback at the reserved onset when Jev misses the musical deadline, with decision provenance visible in the terminal and browser state;
+- add deterministic tests for the tightened phrase boundary, straight response grid, swung response grid, and browser render loop.
 
 ## Out of scope for the early MVP
 
