@@ -176,8 +176,12 @@ public struct PhraseSegmenter: Sendable {
         } else {
             typicalInterval = intervals[intervals.count / 2]
         }
-        let adaptive = typicalInterval * 0.75
-        return UInt64(max(beat * 0.5, min(beat * 1.5, adaptive)).rounded())
+        // A conversational answer should not wait most of another beat after
+        // the player has released the phrase. Keep enough silence to avoid
+        // splitting ordinary articulation, while adapting to the player's
+        // observed onset spacing.
+        let adaptive = typicalInterval * 0.65
+        return UInt64(max(beat * 0.4, min(beat * 1.25, adaptive)).rounded())
     }
 
     private mutating func finalize(

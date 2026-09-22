@@ -30,8 +30,9 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - render the same bounded decisions as one quiet, sustained ambient voicing per bar;
 - remember a human motif and return a delayed, locally transformed trace that fades over two silent bars;
 - preserve a short human subject through context-selected answers and an explicit return;
+- add an optional dry rhythm-box pulse and clipped keyboard punctuation that share Jev's swing grid;
 - mix the human and companion parts independently with MIDI Channel Volume controls;
-- render both MIDI performances as one strongly reactive, beat-synchronized membrane;
+- engrave human, companion, rhythm-box, and keyboard events into one beat-synchronized shared surface;
 - flush pending output and silence the selected channel when a live session stops.
 
 The snapshot grid is explicitly configured with tempo and meter so the same input produces the same state and phrase. Pulse, chord, and bass decisions remain deliberately small and inspectable. The default `rules` brain is fully offline; `jev` only chooses bounded behavior and never generates or schedules individual MIDI notes. An optional browser companion reads the authoritative Swift clock and can start or stop the same live session without entering the MIDI output path.
@@ -201,6 +202,37 @@ With `--brain jev`, one request is made per completed phrase and Jev may select 
 
 `--human-volume` and `--companion-volume` accept MIDI values from 0 to 127 and default to 100 and 72. They send Channel Volume (CC7) to the input and output part channels, so the parts must use different MIDI channels for independent control. If both channel options are the same, the two GUI controls are linked because one MIDI part cannot have two CC7 values.
 
+## Add the dry rhythm-box ensemble
+
+`--groove riot` adds a deliberately spare, early-drum-machine-inspired pulse: kick, rim click, closed hi-hat, occasional hand percussion, and short modal keyboard punctuation. It is an original deterministic pattern, not a transcription of a recorded song. Human activity controls subtraction: denser playing removes offbeat percussion and the keyboard part instead of making the backing busier. Jev's fugue responses use the same swung eighth-note grid, so the click and the answer feel like one band.
+
+The default channels match the four JD-Xi parts: **You** on Digital Synth 1 / CH1, **Keys** on Digital Synth 2 / CH2, **Jev** on Analog Synth / CH3, and **Box** on Drums / CH10. Select a clipped organ, clavinet, or dry electric-key patch for CH2; a short analog bass for CH3; and a compact dry drum kit for CH10. The application does not send bank or program changes, so it never overwrites your JD-Xi sound choices.
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 96 \
+  --input-channel 1 \
+  --texture-channel 2 \
+  --output-channel 3 \
+  --drum-channel 10 \
+  --style fugue \
+  --mode dorian \
+  --brain jev \
+  --intro-bars 2 \
+  --groove riot \
+  --swing 0.58 \
+  --groove-intensity 0.65 \
+  --human-volume 100 \
+  --texture-volume 50 \
+  --companion-volume 72 \
+  --drum-volume 62 \
+  --ui
+```
+
+The four channels must be different when the groove is enabled. **Swing** accepts `0.50...0.68`; `0.50` is straight and the default `0.58` is a relaxed long-short subdivision. **Groove intensity** accepts `0...1`; zero is silent. The browser exposes live **Box**, **Keys**, **Swing**, and **Groove** controls beside the existing human and Jev mix. The rhythm box begins with the shared clock, including the intro, so it also supplies the requested count and pulse before Jev enters.
+
 ## Open the shared beat display
 
 Add `--ui` to `jam`:
@@ -220,11 +252,23 @@ swift run jev-bassist jam \
 
 The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Click **Start** on the downbeat. That single action starts the Swift/CoreMIDI bar clock and the browser display together; the browser does not open MIDI itself and does not run a second independent clock. **Stop** ends the live process safely. You can also press `Return` in Terminal.
 
-The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. The visual field combines a restrained membrane with phrase trajectories derived from the same motif data used by the conversation engine. A captured human line remains in white; companion events are revealed in green when handed to the output, while only notes whose scheduled onset has elapsed become conversation memory. Source-response links use stable source-note IDs, so fragmentation does not falsely connect unrelated positions. Sequence, modal inversion, fragmentation, augmentation, and return change the spacing, direction, density, and convergence of one shared family of curves rather than spawning symbolic polygons. Velocity and channel volume control local energy. In memory and fugue modes the engine publishes four slow expression values: remembered strength controls coupling, tension changes stiffness, activity changes line weight, and resonance controls damping and afterimage length.
+The **You** and **Jev** sliders send CC7 directly to their configured JD-Xi parts, including before the clock starts. With the rhythm box enabled, **Box** and **Keys** control CH10 and CH2 independently, while **Swing** and **Groove** affect future scheduled bars.
 
-MIDI alone is sufficient for the phrase geometry. The optional **Visual audio input** selector analyzes energy and spectral brightness inside the browser; select the UR22mkII loopback/mix route if the field should follow the combined audible session. The default laptop microphone is not assumed to contain that mix, and no audio is sent to the Swift process or a remote service.
+The performance view is a high-contrast kinetic score rather than a decorative particle field. A restrained perspective grid carries the shared beat; human pitch, onset, duration, and rests form a precise white trace; and Jev reveals its actually sounded response prefix in cyan in the same time/pitch coordinates. Fine correspondence lines expose inheritance without becoming the foreground, while each new response head emits one short scan pulse. Kick contracts the spatial grid, rim click shears it, hi-hat cuts a brief incision, and keyboard punctuation produces a local coordinate interference pattern. These rhythm events never use drum-note numbers as melodic height and never overwrite the remembered phrase.
 
-For the membrane to follow the actual mixed sound and reverb as well, connect the JD-Xi audio outputs to the UR22mkII inputs, select the UR22mkII as the browser or macOS input, and click **Audio**. Chrome will request input permission once. The page analyzes only RMS energy and spectral brightness inside the browser; it does not play, upload, or send the audio to Swift. Leave Audio off when only MIDI response is desired.
+Fugue phrase detection now closes after roughly 0.4–1.25 beats of adaptive release silence instead of 0.5–1.5 beats. A response reserves a 60 ms scheduling lead and may enter on a fine straight or swung subdivision, so a clear reply no longer waits for the following eighth-note opportunity. Jev still chooses only among locally safe candidates; if its network result misses that musical deadline, the local candidate answers at the reserved onset and the terminal reports `brain=fallback`.
+
+All automatic parts use the same absolute session-beat grid. The companion first converts every candidate onset to an absolute beat, then snaps it once to the same fine swung subdivisions used by its entrance; it never restarts swing phase at the beginning of a response. Drum, keyboard punctuation, and companion timing use full grid strength. This prevents an offbeat response start from shifting every later companion note behind the rhythm box.
+
+Visual history is beat-relative and bounded. Reconnection restores retained phrase geometry without replaying old flashes, cancellation removes only the unsounded suffix, and each response event carries its exact response-note index rather than inferring progress from the number of packets received. **Visual sync** shifts browser rendering from -120 to +120 ms for a particular synth/audio path. Positive values draw later. The page also honors reduced-motion preferences by reducing line count and large deformation while retaining phrase identity.
+
+MIDI alone is sufficient for phrase geometry. The optional **Visual audio input** selector analyzes only energy and spectral brightness inside the browser. Energy changes line weight and input decay; brightness changes the fine texture. It does not infer pitch, reverb, or musical lineage, and it never duplicates MIDI attacks. Select the UR22mkII loopback/mix route if the surface should follow the combined audible session. The default laptop microphone is not assumed to contain that mix, and no audio is sent to the Swift process or a remote service.
+
+To include the actual mixed sound, connect the JD-Xi audio outputs to the UR22mkII inputs, select the UR22mkII as the browser or macOS input, and click **Audio**. Chrome will request input permission once. Leave Audio off when only MIDI structure is desired.
+
+For a deterministic visual review without MIDI hardware, run the normal `jam ... --ui` command and open `http://127.0.0.1:8765/?visual-demo=1`. The browser loops a fixed human phrase, rhythm-box part, keyboard punctuation, and indexed companion response. This route sends no MIDI and exists for comparing visual changes from the same event sequence.
+
+Use [VISUAL_VALIDATION.md](VISUAL_VALIDATION.md) for the fixed live scenarios, synchronization check, 30-minute endurance run, and separate ratings for appearance, musical connection, phrase recognition, and desire to continue playing.
 
 Swift sends state changes with server-sent events. Every event carries a monotonic Swift session offset that the page maps onto `performance.now()`, so wall-clock corrections cannot jump the musical timeline. A slow browser retains at most one in-flight and one latest SSE snapshot, preventing an unbounded display backlog. The TypeSafe API key remains in the Swift process and is never sent to the page.
 

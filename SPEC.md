@@ -218,11 +218,58 @@ The primary human evaluation is a short rating of “this felt like another play
 - keep an immutable origin and a separately revisable shared theme, requiring repeated or sufficiently strong evidence before replacing the theme;
 - choose an explicit intent—acknowledge, continue, question, support, settle, or wait—before selecting a locally safe response;
 - permit at most one short autonomous continuation after a reply, then wait instead of allowing a machine-only chain;
-- reserve a half-beat response opportunity and derive the Jev deadline from it; a timeout uses the local candidate at the same onset;
+- reserve the next fine straight or swung response opportunity with a bounded scheduling lead and derive the Jev deadline from it; a timeout uses the local candidate at the same onset;
 - preserve already elapsed response notes when a later phrase replaces an unsent suffix, including paired releases already handed to CoreMIDI;
 - send Jev bounded conversation state and candidate IDs while retaining pitch, rhythm, mode, register, timing, and MIDI safety locally;
 - write scheduler events and cancellations to evaluation trace v3 while continuing to decode v1 and v2 without inventing absent history;
 - map browser events from Swift session offsets to `performance.now()`, keep stable note/source IDs, coalesce slow SSE clients, and draw recorded note correspondence rather than array-position links.
+
+### M13: shared rhythm-box ensemble
+
+- add an opt-in deterministic rhythm-box layer on a dedicated drum channel, using kick, rim click, closed hi-hat, and sparse hand percussion without copying a recorded pattern;
+- put the rhythm box on the authoritative Swift session clock from the first intro bar so it acts as the audible count-in;
+- subtract offbeats, hand percussion, and keyboard punctuation as measured human density rises;
+- generate only short, one-note modal keyboard punctuation on a separate part after a stable tonal center is available;
+- align fugue note shapes to the adjustable swing while allowing entrances on its finer subdivisions, keeping all scheduling local;
+- keep human, keyboard, companion, and drum channels distinct and expose independent bounded CC7 levels for all four parts;
+- expose swing and groove intensity in the loopback browser while applying changes only to future scheduled material;
+- publish rhythm and keyboard MIDI events through the existing committed visual-event path without moving MIDI scheduling into the browser;
+- leave bank and program selection on the instrument, avoiding device-specific patch mutation;
+- preserve identical behavior when the groove is off, including existing CLI defaults and deterministic conversation tests.
+
+### M14: shared engraved performance surface
+
+- replace the membrane, per-note glow, left/right performer split, and decorative correspondence lines with one large shared surface;
+- derive human and companion contours from actual pitch, onset, duration, and rest geometry in one common coordinate system;
+- identify every sounded companion attack by its explicit response-note index so packet loss, cancellation, or reconnection cannot reveal the wrong prefix;
+- restore retained phrase geometry after reconnection without replaying old transient attacks, while keeping visual history bounded to 256 events and eight phrase forms;
+- make kick compress the surface, rim click shear it, hi-hat incise it briefly, and keyboard punctuation create only local interference;
+- use optional local audio energy and spectral brightness for line texture and decay, without claiming pitch, reverb, or lineage inference;
+- expire phrase memory in tempo-relative beats, keep percussion transients short in milliseconds, and preserve existing cancellation semantics;
+- expose a browser-local -120...+120 ms visual timing adjustment for instrument and monitoring latency;
+- honor reduced-motion preferences while preserving the recognizable phrase relationship;
+- provide a deterministic browser-only visual demo and run it in CI with mocked canvas and clock state;
+- keep the Start action visible while ready and remove performance controls from the foreground after the session begins.
+
+### M15: kinetic score and low-latency reply
+
+- replace the soft layered plate aesthetic with a restrained black, white, cyan, and signal-red kinetic score built from precision traces, correspondence vectors, scan pulses, and a beat-driven perspective grid;
+- make spatial motion follow committed pitch/time lineage, shared clock phase, drum role, keyboard pitch, and optional local audio energy rather than an unrelated decorative simulation;
+- keep human and companion identity distinct while drawing both in one coordinate system and preserving exact sounded-prefix, cancellation, reconnect, and reduced-motion behavior;
+- shorten adaptive phrase-release detection from 0.5–1.5 beats to 0.4–1.25 beats without splitting an established phrase across an ordinary articulation gap;
+- reserve only 60 ms of response scheduling lead and use quarter-beat or fine swung entry opportunities instead of waiting for a full eighth-note grid location;
+- retain local deterministic fallback at the reserved onset when Jev misses the musical deadline, with decision provenance visible in the terminal and browser state;
+- add deterministic tests for the tightened phrase boundary, straight response grid, swung response grid, and browser render loop.
+
+### M16: single-phase ensemble grid
+
+- treat the Swift session clock as the only rhythmic origin for drums, keyboard punctuation, and every companion Note On;
+- convert candidate-relative onsets to absolute session beats before applying swing, then quantize exactly once;
+- never restart swing phase at a companion response boundary, including an entrance on a swung or fine subdivision;
+- use full shared-grid strength for all automatic parts and reserve expressive microtiming for a future bounded post-grid layer;
+- preserve candidate timing summaries after grid placement so Jev selects among the same rhythms that local rendering will schedule;
+- realign safely if a stalled live queue moves a pending response to a later opportunity;
+- test absolute companion onsets rather than only relative intervals or the response start.
 
 ## Out of scope for the early MVP
 

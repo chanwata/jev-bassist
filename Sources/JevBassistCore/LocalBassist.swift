@@ -1691,6 +1691,7 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
     public let progression: [ChordCandidate]
     public let style: AccompanimentStyle
     public let mode: MusicalMode?
+    public let grooveTiming: GrooveTiming?
 
     public init(
         musicalState: MusicalStateConfiguration,
@@ -1699,7 +1700,8 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
         outputChannel: UInt8 = 3,
         progression: [ChordCandidate] = [],
         style: AccompanimentStyle = .bass,
-        mode: MusicalMode? = nil
+        mode: MusicalMode? = nil,
+        grooveTiming: GrooveTiming? = nil
     ) throws {
         guard (0...32).contains(introBars) else {
             throw LocalBassistError.invalidIntroBars(introBars)
@@ -1726,6 +1728,7 @@ public struct LocalBassistConfiguration: Equatable, Sendable {
         self.progression = progression
         self.style = style
         self.mode = mode
+        self.grooveTiming = grooveTiming
     }
 }
 
@@ -1781,6 +1784,7 @@ public struct LocalBassistEngine: Sendable {
                     musicalStateConfiguration: configuration.musicalState,
                     mode: $0,
                     outputChannel: configuration.outputChannel,
+                    grooveTiming: configuration.grooveTiming,
                     decisionProvider: conversationDecisionProvider
                 )
             }
@@ -1867,6 +1871,10 @@ public struct LocalBassistEngine: Sendable {
 
     public mutating func yieldToHuman() {
         conversationEngine?.yieldToHuman()
+    }
+
+    public mutating func setConversationGrooveTiming(_ timing: GrooveTiming?) {
+        conversationEngine?.setGrooveTiming(timing)
     }
 
     public mutating func acknowledgeCommittedConversationNote(responseID: UInt64) {

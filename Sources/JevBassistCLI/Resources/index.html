@@ -7,13 +7,13 @@
   <style>
     :root {
       color-scheme: dark;
-      --ink: #f2f0e8;
-      --muted: #85877f;
+      --ink: #f4f7fb;
+      --muted: #79828e;
       --panel: rgba(14, 15, 14, .78);
       --line: rgba(242, 240, 232, .13);
-      --acid: #c8ff45;
-      --acid-soft: rgba(200, 255, 69, .15);
-      --orange: #ff785a;
+      --acid: #5ce1ff;
+      --acid-soft: rgba(92, 225, 255, .14);
+      --orange: #ff365e;
     }
 
     * { box-sizing: border-box; }
@@ -22,7 +22,7 @@
     body {
       margin: 0;
       overflow-x: hidden;
-      background: #080908;
+      background: #030507;
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
       letter-spacing: -.015em;
@@ -33,7 +33,7 @@
       inset: 0;
       content: "";
       pointer-events: none;
-      background: radial-gradient(circle at 50% 50%, transparent 0, rgba(0,0,0,.32) 75%);
+      background: radial-gradient(circle at 50% 46%, transparent 0, rgba(0,0,0,.52) 82%);
       z-index: 1;
     }
 
@@ -47,6 +47,31 @@
     }
 
     button, input, select { font: inherit; }
+
+    .start-overlay {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      z-index: 4;
+      display: none;
+      min-width: 142px;
+      padding: 12px 18px;
+      border: 1px solid rgba(200,255,69,.32);
+      border-radius: 999px;
+      background: rgba(8,9,8,.68);
+      color: var(--acid);
+      box-shadow: 0 0 42px rgba(200,255,69,.08);
+      backdrop-filter: blur(12px);
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    body.session-ready .start-overlay { display: block; }
+    .start-overlay:hover { background: rgba(200,255,69,.12); transform: translate(-50%, calc(-50% - 1px)); }
+    .start-overlay:active { transform: translate(-50%, -50%); }
+    .start-overlay:disabled { display: none; }
 
     .shell {
       position: relative;
@@ -243,7 +268,8 @@
 
     .panel:hover, .panel:focus-within {
       width: min(280px, calc(100vw - 20px));
-      max-height: 420px;
+      max-height: calc(100vh - 20px);
+      overflow-y: auto;
       border-color: var(--line);
       padding: 12px;
       background: rgba(10, 11, 10, .74);
@@ -251,6 +277,8 @@
       backdrop-filter: blur(20px);
       opacity: .88;
     }
+
+    .panel::-webkit-scrollbar { width: 0; }
 
     .panel-title, .mix-heading, .mix-label {
       display: flex;
@@ -330,6 +358,7 @@
     .mix-heading { margin-bottom: 10px; }
     .mix-heading span { color: var(--muted); font-size: 11px; letter-spacing: .1em; }
     .mix-channel + .mix-channel { margin-top: 11px; }
+    [hidden] { display: none !important; }
 
     .mix-label {
       margin-bottom: 8px;
@@ -438,6 +467,7 @@
 </head>
 <body>
   <canvas id="visualizer" aria-hidden="true"></canvas>
+  <button class="start-overlay" id="startOverlay" type="button" disabled>Start session</button>
   <div class="shell">
     <header>
       <div class="brand">JEV/ENSEMBLE <span>live system</span></div>
@@ -506,11 +536,41 @@
             </div>
             <input type="range" class="companion-slider" id="companionVolume" min="0" max="127" value="72" disabled aria-label="Jev companion volume">
           </div>
+          <div class="mix-channel" id="rhythmControls">
+            <div class="mix-label">
+              <span>Box <span class="channel-tag" id="drumChannel">CH —</span></span>
+              <output class="mix-value" id="drumVolumeValue">—</output>
+            </div>
+            <input type="range" id="drumVolume" min="0" max="127" value="62" disabled aria-label="Rhythm box volume">
+          </div>
+          <div class="mix-channel" id="textureControls">
+            <div class="mix-label">
+              <span>Keys <span class="channel-tag" id="textureChannel">CH —</span></span>
+              <output class="mix-value" id="textureVolumeValue">—</output>
+            </div>
+            <input type="range" id="textureVolume" min="0" max="127" value="50" disabled aria-label="Texture keys volume">
+          </div>
+          <div class="row" id="grooveControls">
+            <div class="mix-channel">
+              <div class="mix-label"><span>Swing</span><output class="mix-value" id="swingValue">—</output></div>
+              <input type="range" id="swing" min="0" max="100" value="44" disabled aria-label="Groove swing">
+            </div>
+            <div class="mix-channel">
+              <div class="mix-label"><span>Groove</span><output class="mix-value" id="grooveIntensityValue">—</output></div>
+              <input type="range" id="grooveIntensity" min="0" max="100" value="65" disabled aria-label="Groove intensity">
+            </div>
+          </div>
           <div class="mix-channel">
             <label for="audioInput">Visual audio input</label>
             <select id="audioInput" aria-label="Audio input used only for the visual field">
               <option value="">System default</option>
             </select>
+          </div>
+          <div class="mix-channel">
+            <div class="mix-label">
+              <span>Visual sync</span><output class="mix-value" id="visualSyncValue">0 ms</output>
+            </div>
+            <input type="range" id="visualSync" min="-120" max="120" value="0" aria-label="Visual timing offset in milliseconds">
           </div>
         </section>
 
@@ -531,20 +591,19 @@
 
   <script>
     const ui = Object.fromEntries([
-      'visualizer','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
+      'visualizer','startOverlay','connection','connectionText','phase','barNumber','beatNumber','pulseWrap',
       'beatStrip','caption','midiInput','bpm','beats','intro','armButton','audioButton','resetButton','hint',
-      'noteReadout','footerTiming','humanChannel','companionChannel','humanVolume',
-      'companionVolume','humanVolumeValue','companionVolumeValue','audioInput'
+      'noteReadout','footerTiming','humanChannel','companionChannel','drumChannel','textureChannel',
+      'humanVolume','companionVolume','drumVolume','textureVolume','humanVolumeValue',
+      'companionVolumeValue','drumVolumeValue','textureVolumeValue','swing','swingValue',
+      'grooveIntensity','grooveIntensityValue','rhythmControls','textureControls','grooveControls',
+      'audioInput','visualSync','visualSyncValue'
     ].map(id => [id, document.getElementById(id)]));
 
     const context = ui.visualizer.getContext('2d');
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const pendingEvents = [];
-    const activeNotes = new Map();
-    const visualBursts = [];
-    const phraseFields = new Map();
-    const humanTrace = [];
     const volumeTimers = {};
-    const membrane = {positions: [], velocities: [], bands: 9, nodes: 108};
     let state = null;
     let renderedBeat = -1;
     let renderedBeatsPerBar = 0;
@@ -561,18 +620,10 @@
     let audioSpectrum = null;
     let audioEnergy = 0;
     let audioBrightness = 0;
-    let fieldFlash = 0;
-
-    function resetMembrane() {
-      membrane.positions = Array.from(
-        {length: membrane.bands},
-        () => new Float32Array(membrane.nodes)
-      );
-      membrane.velocities = Array.from(
-        {length: membrane.bands},
-        () => new Float32Array(membrane.nodes)
-      );
-    }
+    let visualLatencyMilliseconds = 0;
+    const sharedPlate = createSharedPlateRenderer(context, prefersReducedMotion);
+    const visualDemoEnabled = new URLSearchParams(location.search).get('visual-demo') === '1';
+    let visualDemo = null;
 
     function resizeCanvas() {
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -581,7 +632,6 @@
       ui.visualizer.width = Math.round(viewportWidth * ratio);
       ui.visualizer.height = Math.round(viewportHeight * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      resetMembrane();
     }
 
     function rebuildBeats(count) {
@@ -607,9 +657,10 @@
       for (const event of [...events].sort((a, b) => a.id - b.id)) {
         if (event.id <= highestVisualEventID) continue;
         highestVisualEventID = event.id;
-        if (event.sessionOffsetMicroseconds >= elapsed - 1_500_000) {
-          pendingEvents.push(event);
-        }
+        pendingEvents.push({
+          ...event,
+          replaySilently: event.sessionOffsetMicroseconds < elapsed - 1_500_000
+        });
       }
       pendingEvents.sort(
         (a, b) => a.sessionOffsetMicroseconds - b.sessionOffsetMicroseconds
@@ -621,10 +672,7 @@
         currentSessionID = next.sessionID;
         highestVisualEventID = 0;
         pendingEvents.splice(0);
-        activeNotes.clear();
-        phraseFields.clear();
-        humanTrace.splice(0);
-        visualBursts.splice(0);
+        sharedPlate.reset();
         clockAnchorPerformance = next.sessionElapsedMicroseconds == null
           ? null
           : performance.now() - next.sessionElapsedMicroseconds / 1000;
@@ -643,10 +691,27 @@
       ui.intro.value = next.introBars;
       ui.humanChannel.textContent = `CH ${next.humanChannel}`;
       ui.companionChannel.textContent = `CH ${next.companionChannel}`;
+      ui.drumChannel.textContent = `CH ${next.drumChannel}`;
+      ui.textureChannel.textContent = `CH ${next.textureChannel}`;
       setSlider(ui.humanVolume, ui.humanVolumeValue, next.humanVolume);
       setSlider(ui.companionVolume, ui.companionVolumeValue, next.companionVolume);
+      setSlider(ui.drumVolume, ui.drumVolumeValue, next.drumVolume);
+      setSlider(ui.textureVolume, ui.textureVolumeValue, next.textureVolume);
+      const grooveEnabled = next.groove === 'riot';
+      const swingValue = Math.round((next.swing - .5) / .18 * 100);
+      setSlider(ui.swing, ui.swingValue, Math.max(0, Math.min(100, swingValue)));
+      setSlider(ui.grooveIntensity, ui.grooveIntensityValue, Math.round(next.grooveIntensity * 100));
+      ui.swingValue.value = next.swing.toFixed(2);
+      ui.grooveIntensityValue.value = `${Math.round(next.grooveIntensity * 100)}%`;
       ui.humanVolume.disabled = next.phase === 'stopped';
       ui.companionVolume.disabled = next.phase === 'stopped';
+      ui.drumVolume.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.textureVolume.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.swing.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.grooveIntensity.disabled = !grooveEnabled || next.phase === 'stopped';
+      ui.rhythmControls.hidden = !grooveEnabled;
+      ui.textureControls.hidden = !grooveEnabled;
+      ui.grooveControls.hidden = !grooveEnabled;
       const modalLabel = next.mode ? ` · ${next.tonalCenter ?? '?'} ${next.mode}` : '';
       ui.footerTiming.textContent = `${next.tempoBPM} BPM · ${next.beatsPerBar}/4 · ${next.brain} · ${next.style}${modalLabel} after ${next.introBars} bars`;
       const harmony = next.nextChord
@@ -655,6 +720,11 @@
       const center = next.mode ? ` · MODE ${next.tonalCenter ?? '?'} ${next.mode}` : '';
       ui.noteReadout.textContent = `CHORD ${harmony}${center} · NOTE ${next.lastNote ?? '—'}`;
       ui.armButton.disabled = next.running || next.phase === 'stopped';
+      ui.startOverlay.disabled = next.running || next.phase === 'stopped';
+      document.body.classList.toggle(
+        'session-ready',
+        !next.running && next.phase !== 'stopped'
+      );
       ui.resetButton.disabled = next.phase === 'stopped';
       ui.armButton.textContent = next.running ? 'Running' : 'Start';
       rebuildBeats(next.beatsPerBar);
@@ -671,95 +741,33 @@
     }
 
     function triggerVisualEvent(event, now) {
-      if (event.kind === 'cancel') {
-        const canceled = phraseFields.get(event.responseID);
-        if (canceled) {
-          canceled.cancelledAt = now;
-          canceled.lastAt = now;
-          canceled.energy *= .45;
-        }
-        return;
-      }
       const eventNow = clockAnchorPerformance == null
         ? now
-        : clockAnchorPerformance + event.sessionOffsetMicroseconds / 1000;
-      const key = event.noteID == null
-        ? `${event.performer}:${event.note}`
-        : `${event.performer}:${event.noteID}`;
-      if (event.kind === 'noteOn' && event.velocity > 0) {
-        activeNotes.set(key, {...event, startedAt: eventNow});
-        const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
-        const energy = Math.max(.15, event.velocity / 127) * performerGain(event.performer);
-        visualBursts.push({
-          startedAt: eventNow,
-          x: (event.performer === 'human' ? .14 : .86) * viewportWidth,
-          y: (.15 + (1 - pitch) * .7) * viewportHeight,
-          energy,
-          performer: event.performer
-        });
-        if (visualBursts.length > 32) visualBursts.shift();
-        fieldFlash = Math.min(1, fieldFlash + energy * (event.performer === 'human' ? .45 : .62));
-        if (event.performer === 'human') {
-          humanTrace.push({startedAt: eventNow, note: event.note, energy});
-          if (humanTrace.length > 48) humanTrace.shift();
-        }
-        if (event.performer === 'companion' && event.originMotifID != null) {
-          const relationship = event.relationship ?? 'echo';
-          const generation = event.generation ?? 0;
-          const response = event.responseID ?? event.id;
-          const existing = phraseFields.get(response);
-          const signal = existing ?? {
-            startedAt: eventNow,
-            lastAt: eventNow,
-            origin: event.originMotifID,
-            response,
-            parent: event.parentResponseID,
-            generation,
-            relationship,
-            intent: event.intent ?? 'continueIdea',
-            interaction: event.interaction ?? 'ambiguous',
-            interactionConfidence: event.interactionConfidence ?? 0,
-            energy: 0,
-            revealed: 0,
-            originGesture: event.originGesture ?? [],
-            sourceGesture: event.sourceGesture ?? [],
-            responseGesture: event.responseGesture ?? []
-          };
-          signal.lastAt = eventNow;
-          signal.energy = Math.max(signal.energy * .72, energy);
-          signal.revealed = Math.min(
-            signal.responseGesture.length,
-            signal.revealed + 1
-          );
-          phraseFields.set(response, signal);
-          while (phraseFields.size > 8) {
-            phraseFields.delete(phraseFields.keys().next().value);
-          }
-          if (relationship === 'originalReturn') fieldFlash = Math.max(fieldFlash, .55);
-        }
-      } else {
-        activeNotes.delete(key);
-      }
-      disturbMembrane(event);
+        : clockAnchorPerformance + event.sessionOffsetMicroseconds / 1000
+          + visualLatencyMilliseconds;
+      sharedPlate.ingest(event, eventNow, event.replaySilently === true);
     }
 
     function consumeVisualEvents(now) {
       while (pendingEvents.length && (
         clockAnchorPerformance == null
           || clockAnchorPerformance
-            + pendingEvents[0].sessionOffsetMicroseconds / 1000 <= now + 8
+            + pendingEvents[0].sessionOffsetMicroseconds / 1000
+            + visualLatencyMilliseconds <= now + 8
       )) {
         triggerVisualEvent(pendingEvents.shift(), now);
       }
-      for (const [key, note] of activeNotes) {
-        if (now - note.startedAt > 15000) activeNotes.delete(key);
-      }
-      while (humanTrace.length && now - humanTrace[0].startedAt > 9000) humanTrace.shift();
     }
 
     function performerGain(performer) {
       if (!state) return .5;
-      const value = performer === 'human' ? state.humanVolume : state.companionVolume;
+      const value = performer === 'human'
+        ? state.humanVolume
+        : performer === 'rhythm'
+          ? state.drumVolume
+          : performer === 'texture'
+            ? state.textureVolume
+            : state.companionVolume;
       return Math.max(.08, value / 127);
     }
 
@@ -794,347 +802,6 @@
       audioBrightness += (Math.min(1, centroid * 2.6) - audioBrightness) * .08;
     }
 
-    function disturbMembrane(event) {
-      const pitch = Math.max(0, Math.min(1, (event.note - 36) / 48));
-      const band = Math.round((1 - pitch) * (membrane.bands - 1));
-      const x = event.performer === 'human' ? .18 : .82;
-      const node = Math.round(x * (membrane.nodes - 1));
-      const gain = performerGain(event.performer);
-      const onset = event.kind === 'noteOn' && event.velocity > 0;
-      const energy = Math.max(.08, event.velocity / 127) * gain * (onset ? 1 : -.22);
-      const direction = event.performer === 'human' ? 1 : -1;
-
-      for (let bandOffset = -5; bandOffset <= 5; bandOffset++) {
-        const targetBand = band + bandOffset;
-        if (targetBand < 0 || targetBand >= membrane.bands) continue;
-        for (let nodeOffset = -24; nodeOffset <= 24; nodeOffset++) {
-          const targetNode = node + nodeOffset;
-          if (targetNode <= 0 || targetNode >= membrane.nodes - 1) continue;
-          const falloff = Math.exp(-Math.abs(nodeOffset) * .075 - Math.abs(bandOffset) * .3);
-          membrane.velocities[targetBand][targetNode] += direction * energy * falloff * 1.12;
-        }
-      }
-    }
-
-    function evolveMembrane(now, deltaSeconds) {
-      const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
-      const memory = expression('expressionMemory', 0);
-      const resonance = Math.max(expression('expressionResonance', .2), audioEnergy * .9);
-      const stiffness = .16 + tension * .14;
-      const damping = Math.min(.992, .935 + resonance * .05);
-      const step = Math.min(2, deltaSeconds * 60);
-
-      for (const note of activeNotes.values()) {
-        const pitch = Math.max(0, Math.min(1, (note.note - 36) / 48));
-        const band = Math.round((1 - pitch) * (membrane.bands - 1));
-        const node = Math.round((note.performer === 'human' ? .18 : .82) * (membrane.nodes - 1));
-        const direction = note.performer === 'human' ? 1 : -1;
-        const energy = note.velocity / 127 * performerGain(note.performer);
-        membrane.velocities[band][node] += Math.sin(now * .002 + note.note) * energy * .009 * direction;
-      }
-      if (audioEnergy > .015) {
-        const centerBand = Math.round((1 - audioBrightness) * (membrane.bands - 1));
-        const centerNode = Math.round(membrane.nodes * .5);
-        membrane.velocities[centerBand][centerNode] += Math.sin(now * .004) * audioEnergy * .03;
-      }
-
-      const nextVelocities = membrane.velocities.map(row => new Float32Array(row));
-      for (let band = 0; band < membrane.bands; band++) {
-        for (let node = 1; node < membrane.nodes - 1; node++) {
-          const position = membrane.positions[band][node];
-          const horizontal = membrane.positions[band][node - 1]
-            + membrane.positions[band][node + 1] - position * 2;
-          let vertical = 0;
-          if (band > 0) vertical += membrane.positions[band - 1][node] - position;
-          if (band < membrane.bands - 1) vertical += membrane.positions[band + 1][node] - position;
-          const restoring = -position * (.007 + (1 - memory) * .006);
-          nextVelocities[band][node] = (
-            membrane.velocities[band][node]
-            + horizontal * stiffness * step
-            + vertical * memory * .018 * step
-            + restoring * step
-          ) * Math.pow(damping, step);
-        }
-      }
-      membrane.velocities = nextVelocities;
-      for (let band = 0; band < membrane.bands; band++) {
-        for (let node = 1; node < membrane.nodes - 1; node++) {
-          membrane.velocities[band][node] = Math.max(-1.5, Math.min(1.5, membrane.velocities[band][node]));
-          membrane.positions[band][node] = Math.max(
-            -3.8,
-            Math.min(3.8, membrane.positions[band][node] + membrane.velocities[band][node] * step)
-          );
-        }
-      }
-    }
-
-    function drawBursts(now, deltaSeconds) {
-      const frameDecay = Math.pow(.08, Math.min(.1, deltaSeconds));
-      fieldFlash *= Number.isFinite(frameDecay) ? frameDecay : .9;
-      if (fieldFlash > .01) {
-        context.fillStyle = `rgba(225,255,179,${fieldFlash * .1})`;
-        context.fillRect(0, 0, viewportWidth, viewportHeight);
-      }
-      context.save();
-      context.globalCompositeOperation = 'screen';
-      for (let index = visualBursts.length - 1; index >= 0; index--) {
-        const burst = visualBursts[index];
-        const age = now - burst.startedAt;
-        if (age > 1050) {
-          visualBursts.splice(index, 1);
-          continue;
-        }
-        const progress = age / 1050;
-        const alpha = Math.pow(1 - progress, 2.1) * burst.energy;
-        const radius = 18 + progress * 110;
-        const color = burst.performer === 'human' ? '242,240,232' : '200,255,69';
-        const glow = context.createRadialGradient(
-          burst.x, burst.y, 0,
-          burst.x, burst.y, Math.max(1, radius)
-        );
-        glow.addColorStop(0, `rgba(${color},${alpha * .34})`);
-        glow.addColorStop(.2, `rgba(${color},${alpha * .11})`);
-        glow.addColorStop(1, `rgba(${color},0)`);
-        context.fillStyle = glow;
-        context.fillRect(burst.x - radius, burst.y - radius, radius * 2, radius * 2);
-        context.strokeStyle = `rgba(${color},${alpha * .82})`;
-        context.lineWidth = .7 + burst.energy * 2.4 * (1 - progress);
-        context.shadowColor = `rgba(${color},${alpha * .72})`;
-        context.shadowBlur = 9 + burst.energy * 18;
-        context.beginPath();
-        context.moveTo(burst.x, burst.y - radius * .38);
-        context.bezierCurveTo(
-          burst.x - radius * .16, burst.y - radius * .12,
-          burst.x + radius * .16, burst.y + radius * .12,
-          burst.x, burst.y + radius * .38
-        );
-        context.stroke();
-      }
-      context.restore();
-    }
-
-    function relationshipMotion(relationship) {
-      switch (relationship) {
-        case 'sequence': return {strands: 13, spread: 11, drift: .9, life: 10500};
-        case 'inversion': return {strands: 11, spread: 14, drift: -1.1, life: 11000};
-        case 'fragmentation': return {strands: 7, spread: 19, drift: 1.5, life: 8200};
-        case 'augmentation': return {strands: 17, spread: 9, drift: .35, life: 14500};
-        case 'originalReturn': return {strands: 21, spread: 7, drift: 0, life: 13000};
-        case 'tailVariation': return {strands: 9, spread: 12, drift: .7, life: 9500};
-        default: return {strands: 9, spread: 10, drift: .45, life: 9000};
-      }
-    }
-
-    function gestureCoordinates(points, bounds, xStart, xEnd, fixedMaximumTime = null) {
-      if (!points?.length) return [];
-      const maximumTime = fixedMaximumTime ?? Math.max(
-          .25,
-          ...points.map(point => point.relativeOnsetBeats + point.durationBeats)
-        );
-      const span = Math.max(5, bounds.maximumNote - bounds.minimumNote);
-      return points.map(point => ({
-        sourceNoteID: point.sourceNoteID,
-        x: xStart + point.relativeOnsetBeats / maximumTime * (xEnd - xStart),
-        y: viewportHeight * (.78 - (point.note - bounds.minimumNote) / span * .56),
-        intensity: point.intensity ?? .6,
-        duration: point.durationBeats / maximumTime
-      }));
-    }
-
-    function strokeGesture(points, offset, fragment, alpha) {
-      if (!points.length) return;
-      if (points.length === 1) {
-        context.globalAlpha = alpha;
-        context.beginPath();
-        context.arc(points[0].x, points[0].y + offset, 1.2, 0, Math.PI * 2);
-        context.stroke();
-        return;
-      }
-      context.beginPath();
-      let previous = points[0];
-      context.moveTo(previous.x, previous.y + offset);
-      for (let index = 1; index < points.length; index++) {
-        const point = points[index];
-        if (fragment && point.x - previous.x > viewportWidth * .2) {
-          context.moveTo(point.x, point.y + offset);
-          previous = point;
-          continue;
-        }
-        const middleX = (previous.x + point.x) * .5;
-        const middleY = (previous.y + point.y) * .5 + offset;
-        context.quadraticCurveTo(
-          previous.x,
-          previous.y + offset,
-          middleX,
-          middleY
-        );
-        previous = point;
-      }
-      context.lineTo(previous.x, previous.y + offset);
-      context.globalAlpha = alpha;
-      context.stroke();
-    }
-
-    function drawHumanTrace(now) {
-      if (humanTrace.length < 2) return;
-      const recent = humanTrace.map(point => ({
-        x: viewportWidth * (.08 + Math.max(0, 1 - (now - point.startedAt) / 9000) * .4),
-        y: viewportHeight * (.8 - Math.max(0, Math.min(1, (point.note - 36) / 48)) * .6),
-        intensity: point.energy
-      }));
-      context.save();
-      context.strokeStyle = 'rgba(242,240,232,.13)';
-      context.lineWidth = 1;
-      strokeGesture(recent, 0, false, .8);
-      context.restore();
-    }
-
-    function drawLineageForms(now) {
-      context.save();
-      context.globalCompositeOperation = 'screen';
-      drawHumanTrace(now);
-      for (const [responseID, signal] of phraseFields) {
-        const age = now - signal.startedAt;
-        const motion = relationshipMotion(signal.relationship);
-        if (now - signal.lastAt > motion.life) {
-          phraseFields.delete(responseID);
-          continue;
-        }
-        const progress = Math.min(1, age / motion.life);
-        const fade = Math.pow(1 - Math.max(0, (now - signal.lastAt) / motion.life), 1.4);
-        const sourceGesture = signal.sourceGesture.length
-          ? signal.sourceGesture
-          : signal.originGesture;
-        const responseGesture = signal.responseGesture.slice(0, signal.revealed);
-        const allNotes = [...sourceGesture, ...signal.responseGesture].map(point => point.note);
-        const bounds = {
-          minimumNote: Math.min(...allNotes, 48) - 2,
-          maximumNote: Math.max(...allNotes, 60) + 2
-        };
-        const sourceTime = Math.max(
-          .25,
-          ...sourceGesture.map(point => point.relativeOnsetBeats + point.durationBeats)
-        );
-        const responseTime = Math.max(
-          .25,
-          ...signal.responseGesture.map(point => point.relativeOnsetBeats + point.durationBeats)
-        );
-        const source = gestureCoordinates(
-          sourceGesture,
-          bounds,
-          viewportWidth * .08,
-          viewportWidth * .49,
-          sourceTime
-        );
-        const response = gestureCoordinates(
-          responseGesture,
-          bounds,
-          viewportWidth * .51,
-          viewportWidth * .92,
-          responseTime
-        );
-        const drift = Math.sin(now * .00023 + signal.generation * .7) * motion.spread * motion.drift;
-
-        context.shadowBlur = 0;
-        context.lineWidth = .75;
-        context.strokeStyle = 'rgba(242,240,232,.34)';
-        for (let strand = -3; strand <= 3; strand++) {
-          strokeGesture(source, strand * 3.2, false, fade * (.16 + (3 - Math.abs(strand)) * .05));
-        }
-
-        const fragment = signal.relationship === 'fragmentation';
-        for (let strand = 0; strand < motion.strands; strand++) {
-          const centered = strand - (motion.strands - 1) / 2;
-          const breathing = Math.sin(now * .00042 + strand * .63 + signal.generation) * 3;
-          const offset = centered * motion.spread * (.45 + progress * .55) + drift + breathing;
-          const centrality = 1 - Math.abs(centered) / Math.max(1, motion.strands / 2);
-          context.strokeStyle = signal.relationship === 'originalReturn'
-            ? 'rgba(242,240,232,.95)'
-            : 'rgba(200,255,69,.92)';
-          context.lineWidth = .45 + centrality * (1.1 + signal.energy * 1.8);
-          context.shadowColor = signal.relationship === 'originalReturn'
-            ? 'rgba(242,240,232,.42)'
-            : 'rgba(200,255,69,.38)';
-          context.shadowBlur = 3 + centrality * 13 * signal.energy;
-          strokeGesture(response, offset, fragment, fade * (.12 + centrality * .5));
-        }
-
-        context.shadowBlur = 0;
-        context.lineWidth = .6;
-        context.strokeStyle = 'rgba(242,240,232,.18)';
-        const sourceByID = new Map(
-          source.filter(point => point.sourceNoteID != null)
-            .map(point => [String(point.sourceNoteID), point])
-        );
-        for (const end of response) {
-          const start = end.sourceNoteID == null
-            ? null
-            : sourceByID.get(String(end.sourceNoteID));
-          if (!start) continue;
-          context.beginPath();
-          context.moveTo(start.x, start.y);
-          context.bezierCurveTo(
-            viewportWidth * .46, start.y,
-            viewportWidth * .54, end.y,
-            end.x, end.y
-          );
-          context.globalAlpha = fade * .45;
-          context.stroke();
-        }
-      }
-      context.globalAlpha = 1;
-      context.restore();
-    }
-
-    function drawMembrane(now, beatProgress, absoluteBeat, deltaSeconds) {
-      const memory = expression('expressionMemory', 0);
-      const tension = Math.min(1, expression('expressionTension', .15) + audioBrightness * .28);
-      const activity = Math.max(expression('expressionActivity', 0), audioEnergy);
-      const resonance = Math.max(expression('expressionResonance', .2), audioEnergy * .9);
-      const fade = .13 - resonance * .075;
-      context.fillStyle = `rgba(8,9,8,${Math.max(.055, fade)})`;
-      context.fillRect(0, 0, viewportWidth, viewportHeight);
-      drawBursts(now, deltaSeconds);
-      drawLineageForms(now);
-
-      const gradient = context.createLinearGradient(0, 0, viewportWidth, 0);
-      gradient.addColorStop(0, `rgba(242,240,232,${.22 + activity * .28})`);
-      gradient.addColorStop(.48, `rgba(242,240,232,${.36 + memory * .34})`);
-      gradient.addColorStop(1, `rgba(200,255,69,${.28 + memory * .48})`);
-      context.strokeStyle = gradient;
-      context.lineWidth = 1.6 + activity * 3.2;
-      context.shadowColor = `rgba(200,255,69,${.16 + activity * .2})`;
-      context.shadowBlur = 8 + activity * 18;
-
-      for (let band = 0; band < membrane.bands; band++) {
-        const normalizedBand = band / (membrane.bands - 1);
-        const baseline = viewportHeight * (.18 + normalizedBand * .64);
-        const visibility = 1 - Math.abs(normalizedBand - .5) * .55;
-        context.globalAlpha = visibility * (.58 + memory * .42);
-        context.beginPath();
-        for (let node = 0; node < membrane.nodes; node++) {
-          const x = node / (membrane.nodes - 1) * viewportWidth;
-          const field = membrane.positions[band][node];
-          const drift = Math.sin(node * .19 + band * .72 + now * .00018) * tension * 14;
-          const y = baseline + field * viewportHeight * (.16 + tension * .12) + drift;
-          if (node === 0) context.moveTo(x, y);
-          else context.lineTo(x, y);
-        }
-        context.stroke();
-      }
-      context.globalAlpha = 1;
-      context.shadowBlur = 0;
-
-      const scanX = beatProgress * viewportWidth;
-      const downbeat = state && absoluteBeat % state.beatsPerBar === 0;
-      context.strokeStyle = downbeat ? 'rgba(200,255,69,.20)' : 'rgba(242,240,232,.07)';
-      context.lineWidth = 1;
-      context.beginPath();
-      context.moveTo(scanX, viewportHeight * .12);
-      context.lineTo(scanX, viewportHeight * .88);
-      context.stroke();
-    }
-
     function updateClock(now) {
       if (!state?.running || clockAnchorPerformance == null) return {beatProgress: 0, absoluteBeat: 0};
       const beatMs = 60000 / state.tempoBPM;
@@ -1162,10 +829,10 @@
           const development = state.developmentStage ? ` · ${state.developmentStage}` : '';
           ui.phase.textContent = `Live · ${state.brain}${source}${development}`;
           ui.caption.textContent = state.style === 'memory'
-            ? 'Your gesture bends the left field; its transformed memory returns from the right.'
+            ? 'Your gesture remains engraved while its transformed memory rewrites the same surface.'
             : state.style === 'fugue'
-              ? 'One captured gesture branches through the field, then converges on its origin.'
-              : `Your notes and ${state.style} responses deform the same field.`;
+              ? 'One captured gesture is inherited, transformed, and returned through one shared surface.'
+              : `Your notes and ${state.style} responses rewrite one shared surface.`;
         }
       }
       return {beatProgress, absoluteBeat};
@@ -1176,11 +843,555 @@
       const deltaSeconds = Math.max(0, (frameNow - previousFrame) / 1000);
       previousFrame = frameNow;
       sampleAudio();
+      pumpVisualDemo(frameNow);
       consumeVisualEvents(frameNow);
       const clock = updateClock(frameNow);
-      evolveMembrane(frameNow, deltaSeconds);
-      drawMembrane(frameNow, clock.beatProgress, clock.absoluteBeat, deltaSeconds);
+      sharedPlate.draw({
+        now: frameNow,
+        deltaSeconds,
+        beatProgress: clock.beatProgress,
+        absoluteBeat: clock.absoluteBeat,
+        width: viewportWidth,
+        height: viewportHeight,
+        state,
+        audioEnergy,
+        audioBrightness
+      });
       requestAnimationFrame(render);
+    }
+
+    function visualDemoScript() {
+      const sourceGesture = [
+        {sourceNoteID: 1, note: 62, relativeOnsetBeats: 0, durationBeats: .28, intensity: .82},
+        {sourceNoteID: 2, note: 65, relativeOnsetBeats: .58, durationBeats: .22, intensity: .68},
+        {sourceNoteID: 3, note: 69, relativeOnsetBeats: 1.2, durationBeats: .72, intensity: .9},
+        {sourceNoteID: 4, note: 67, relativeOnsetBeats: 2.3, durationBeats: .34, intensity: .74}
+      ];
+      const responseGesture = [
+        {sourceNoteID: 1, note: 50, relativeOnsetBeats: 0, durationBeats: .24, intensity: .76},
+        {sourceNoteID: 2, note: 53, relativeOnsetBeats: .58, durationBeats: .2, intensity: .62},
+        {sourceNoteID: 3, note: 57, relativeOnsetBeats: 1.2, durationBeats: .66, intensity: .84},
+        {sourceNoteID: 4, note: 55, relativeOnsetBeats: 2.3, durationBeats: .3, intensity: .68}
+      ];
+      const events = [];
+      let id = 1;
+      const add = (at, performer, note, velocity, extra = {}) => events.push({
+        sessionID: 'visual-demo', id: id++, noteID: id + 1000,
+        performer, kind: 'noteOn', note, velocity,
+        sessionOffsetMicroseconds: Math.round(at * 1000),
+        ...extra
+      });
+      for (let beat = 0; beat < 12; beat++) {
+        const at = beat * 500;
+        add(at, 'rhythm', beat % 4 === 0 ? 36 : (beat % 2 === 0 ? 37 : 42), beat % 4 === 0 ? 88 : 55);
+        add(at + 290, 'rhythm', 42, 35);
+      }
+      [0, 580, 1200, 2300].forEach((at, index) => {
+        add(450 + at, 'human', sourceGesture[index].note, Math.round(sourceGesture[index].intensity * 127));
+      });
+      responseGesture.forEach((point, index) => {
+        add(3150 + point.relativeOnsetBeats * 500, 'companion', point.note, Math.round(point.intensity * 127), {
+          responseID: 1,
+          generation: 1,
+          relationship: 'sequence',
+          responseNoteIndex: index,
+          originGesture: sourceGesture,
+          sourceGesture,
+          responseGesture
+        });
+      });
+      add(2440, 'texture', 62, 56);
+      add(4440, 'texture', 69, 48);
+      return events.sort((left, right) => left.sessionOffsetMicroseconds - right.sessionOffsetMicroseconds);
+    }
+
+    function startVisualDemo() {
+      const started = performance.now();
+      visualDemo = {started, cursor: 0, loopMilliseconds: 6800, events: visualDemoScript()};
+      applyState({
+        sessionID: 'visual-demo', running: true, tempoBPM: 120, beatsPerBar: 4,
+        introBars: 0, brain: 'rules', style: 'fugue', mode: 'dorian',
+        source: 'deterministic demo', destination: 'browser only',
+        startedAtUnixMilliseconds: Date.now(), sessionElapsedMicroseconds: 0,
+        bar: 1, beat: 1, phase: 'live', chord: null, nextChord: null,
+        decisionSource: 'rules', developmentStage: null, tonalCenter: 'D', lastNote: null,
+        humanChannel: 1, companionChannel: 3, drumChannel: 10, textureChannel: 2,
+        humanVolume: 100, companionVolume: 72, drumVolume: 62, textureVolume: 50,
+        groove: 'riot', swing: .58, grooveIntensity: .65,
+        expressionMemory: .62, expressionTension: .34,
+        expressionActivity: .46, expressionResonance: .58,
+        visualEvents: []
+      });
+      clockAnchorPerformance = started;
+      document.body.classList.remove('session-ready');
+    }
+
+    function pumpVisualDemo(now) {
+      if (!visualDemo) return;
+      const elapsed = now - visualDemo.started;
+      if (elapsed >= visualDemo.loopMilliseconds) {
+        visualDemo.started += visualDemo.loopMilliseconds;
+        visualDemo.cursor = 0;
+        sharedPlate.reset();
+        clockAnchorPerformance = visualDemo.started;
+      }
+      const loopElapsed = now - visualDemo.started;
+      while (visualDemo.cursor < visualDemo.events.length) {
+        const event = visualDemo.events[visualDemo.cursor];
+        if (event.sessionOffsetMicroseconds / 1000 > loopElapsed) break;
+        sharedPlate.ingest(
+          event,
+          visualDemo.started + event.sessionOffsetMicroseconds / 1000,
+          false
+        );
+        visualDemo.cursor += 1;
+      }
+    }
+
+    function createSharedPlateRenderer(drawingContext, reducedMotionQuery) {
+      const phrases = new Map();
+      const liveHuman = [];
+      const impacts = [];
+      const textures = [];
+      let sessionTempo = 120;
+
+      function reset() {
+        phrases.clear();
+        liveHuman.splice(0);
+        impacts.splice(0);
+        textures.splice(0);
+      }
+
+      function ingest(event, eventNow, silentReplay) {
+        if (event.kind === 'cancel') {
+          const phrase = phrases.get(event.responseID);
+          if (phrase) phrase.cancelledAt = eventNow;
+          return;
+        }
+        const attack = event.kind === 'noteOn' && event.velocity > 0;
+        if (!attack) return;
+        const energy = Math.max(.08, event.velocity / 127) * performerGain(event.performer);
+
+        if (event.performer === 'human') {
+          liveHuman.push({
+            at: eventNow,
+            sessionOffsetMicroseconds: event.sessionOffsetMicroseconds,
+            note: event.note,
+            energy
+          });
+          while (liveHuman.length > 96) liveHuman.shift();
+        } else if (event.performer === 'companion' && event.responseID != null) {
+          const existing = phrases.get(event.responseID);
+          const phrase = existing ?? {
+            id: event.responseID,
+            createdAt: eventNow,
+            lastAt: eventNow,
+            cancelledAt: null,
+            generation: event.generation ?? 0,
+            relationship: event.relationship ?? 'echo',
+            originGesture: event.originGesture ?? [],
+            sourceGesture: event.sourceGesture ?? event.originGesture ?? [],
+            responseGesture: event.responseGesture ?? [],
+            revealedIndices: new Set(),
+            energy: 0
+          };
+          phrase.lastAt = eventNow;
+          phrase.energy = Math.max(phrase.energy * .78, energy);
+          if (Number.isInteger(event.responseNoteIndex)) {
+            phrase.revealedIndices.add(event.responseNoteIndex);
+          }
+          phrases.set(event.responseID, phrase);
+          while (phrases.size > 8) phrases.delete(phrases.keys().next().value);
+        }
+
+        if (silentReplay) return;
+        if (event.performer === 'rhythm') {
+          const type = event.note === 36 ? 'kick'
+            : event.note === 37 ? 'rim'
+              : event.note === 42 ? 'hat' : 'hand';
+          impacts.push({type, at: eventNow, energy});
+          while (impacts.length > 48) impacts.shift();
+        } else if (event.performer === 'texture') {
+          textures.push({at: eventNow, note: event.note, energy});
+          while (textures.length > 16) textures.shift();
+        }
+      }
+
+      function phraseLifeMilliseconds(currentState, phrase) {
+        const tempo = currentState?.tempoBPM ?? sessionTempo;
+        sessionTempo = tempo;
+        const beats = phrase.relationship === 'originalReturn' ? 24 : 16;
+        return 60_000 / tempo * beats;
+      }
+
+      function visibleResponse(phrase) {
+        return phrase.responseGesture.filter((_, index) => phrase.revealedIndices.has(index));
+      }
+
+      function boundsFor(source, response) {
+        const notes = [...source, ...response].map(point => point.note);
+        const minimum = Math.min(...notes, 48) - 3;
+        const maximum = Math.max(...notes, 60) + 3;
+        const maximumTime = Math.max(
+          1,
+          ...source.map(point => point.relativeOnsetBeats + point.durationBeats),
+          ...response.map(point => point.relativeOnsetBeats + point.durationBeats)
+        );
+        return {minimum, maximum, maximumTime};
+      }
+
+      function gesturePoints(gesture, bounds, width, height) {
+        const pitchSpan = Math.max(8, bounds.maximum - bounds.minimum);
+        return gesture.map(point => ({
+          x: width * (.12 + point.relativeOnsetBeats / bounds.maximumTime * .76),
+          y: height * (.74 - (point.note - bounds.minimum) / pitchSpan * .48),
+          duration: Math.max(0, point.durationBeats) / bounds.maximumTime * width * .76,
+          intensity: point.intensity ?? .6,
+          sourceNoteID: point.sourceNoteID
+        }));
+      }
+
+      function liveHumanPoints(now, width, height, currentState) {
+        const beatMilliseconds = 60_000 / (currentState?.tempoBPM ?? 120);
+        const windowMilliseconds = beatMilliseconds * 12;
+        while (liveHuman.length && now - liveHuman[0].at > windowMilliseconds) liveHuman.shift();
+        if (!liveHuman.length) return [];
+        const notes = liveHuman.map(point => point.note);
+        const minimum = Math.min(...notes, 48) - 3;
+        const maximum = Math.max(...notes, 60) + 3;
+        const span = Math.max(8, maximum - minimum);
+        const start = liveHuman[0].at;
+        const duration = Math.max(beatMilliseconds, now - start);
+        return liveHuman.map(point => ({
+          x: width * (.12 + Math.min(1, (point.at - start) / duration) * .76),
+          y: height * (.74 - (point.note - minimum) / span * .48),
+          duration: 0,
+          intensity: point.energy
+        }));
+      }
+
+      function impactState(now) {
+        let compression = 0;
+        let shear = 0;
+        const incisions = [];
+        for (let index = impacts.length - 1; index >= 0; index--) {
+          const impact = impacts[index];
+          const age = now - impact.at;
+          const life = impact.type === 'hat' ? 180 : 520;
+          if (age > life) {
+            impacts.splice(index, 1);
+            continue;
+          }
+          const envelope = Math.pow(1 - age / life, 2) * impact.energy;
+          if (impact.type === 'kick') compression += envelope;
+          else if (impact.type === 'rim') shear += envelope;
+          else if (impact.type === 'hat') incisions.push({envelope, phase: impact.at});
+          else shear -= envelope * .35;
+        }
+        return {
+          compression: Math.min(1, compression),
+          shear: Math.max(-1, Math.min(1, shear)),
+          incisions
+        };
+      }
+
+      function transformPoints(points, rhythm, width, height, reducedMotion) {
+        const compression = reducedMotion ? rhythm.compression * .18 : rhythm.compression;
+        const shear = reducedMotion ? rhythm.shear * .15 : rhythm.shear;
+        return points.map(point => {
+          const centeredX = point.x - width * .5;
+          return {
+            ...point,
+            x: width * .5 + centeredX * (1 - compression * .075),
+            y: point.y + centeredX / width * height * shear * .075
+          };
+        });
+      }
+
+      function drawKineticGrid(frame, rhythm) {
+        const {width, height, beatProgress, absoluteBeat} = frame;
+        const reduced = reducedMotionQuery.matches;
+        const horizon = height * (.53 + rhythm.shear * .018);
+        const center = width * (.5 + rhythm.shear * .025);
+        const contraction = 1 - rhythm.compression * .09;
+        drawingContext.save();
+        drawingContext.globalCompositeOperation = 'screen';
+        drawingContext.strokeStyle = 'rgba(124,151,168,.075)';
+        drawingContext.lineWidth = .55;
+        const rays = reduced ? 9 : 17;
+        for (let index = 0; index < rays; index++) {
+          const targetX = width * (index / (rays - 1));
+          drawingContext.beginPath();
+          drawingContext.moveTo(center, horizon);
+          drawingContext.lineTo(
+            center + (targetX - center) * contraction,
+            height * .93
+          );
+          drawingContext.stroke();
+        }
+        const rows = reduced ? 5 : 10;
+        for (let row = 0; row < rows; row++) {
+          const normalized = row / Math.max(1, rows - 1);
+          const y = horizon + Math.pow(normalized, 1.72) * height * .4;
+          drawingContext.strokeStyle = `rgba(124,151,168,${.035 + normalized * .055})`;
+          drawingContext.beginPath();
+          drawingContext.moveTo(width * .04, y);
+          drawingContext.lineTo(width * .96, y);
+          drawingContext.stroke();
+        }
+        const scanX = width * (.08 + beatProgress * .84);
+        const downbeat = Number.isFinite(absoluteBeat) && absoluteBeat % 4 === 0;
+        drawingContext.strokeStyle = downbeat
+          ? 'rgba(255,54,94,.22)'
+          : 'rgba(92,225,255,.16)';
+        drawingContext.lineWidth = .7 + frame.audioEnergy * .9;
+        drawingContext.beginPath();
+        drawingContext.moveTo(scanX, height * .08);
+        drawingContext.lineTo(scanX, height * .92);
+        drawingContext.stroke();
+        drawingContext.restore();
+      }
+
+      function drawPrecisionTrace(points, options = {}) {
+        if (!points.length) return;
+        const {
+          alpha = 1,
+          color = '244,247,251',
+          width = 1,
+          offsetX = 0,
+          offsetY = 0,
+          nodes = true,
+          stems = true
+        } = options;
+        drawingContext.strokeStyle = `rgba(${color},${alpha})`;
+        drawingContext.fillStyle = `rgba(${color},${Math.min(1, alpha * 1.4)})`;
+        drawingContext.lineWidth = width;
+        drawingContext.beginPath();
+        drawingContext.moveTo(points[0].x + offsetX, points[0].y + offsetY);
+        for (let index = 1; index < points.length; index++) {
+          const previous = points[index - 1];
+          const point = points[index];
+          const middle = previous.x + (point.x - previous.x) * .62;
+          drawingContext.lineTo(middle + offsetX, previous.y + offsetY);
+          drawingContext.lineTo(point.x + offsetX, point.y + offsetY);
+        }
+        drawingContext.stroke();
+        for (const point of points) {
+          const x = point.x + offsetX;
+          const y = point.y + offsetY;
+          if (stems) {
+            drawingContext.globalAlpha = alpha * .32;
+            drawingContext.beginPath();
+            drawingContext.moveTo(x, y - 13 - point.intensity * 12);
+            drawingContext.lineTo(x, y + 13 + point.intensity * 12);
+            drawingContext.stroke();
+          }
+          if (nodes) {
+            drawingContext.globalAlpha = alpha;
+            drawingContext.beginPath();
+            drawingContext.arc(x, y, 1.4 + point.intensity * 1.2, 0, Math.PI * 2);
+            drawingContext.fill();
+          }
+        }
+        drawingContext.globalAlpha = 1;
+      }
+
+      function drawIncisions(rhythm, width, height) {
+        for (const incision of rhythm.incisions) {
+          const position = ((incision.phase * .001618) % 1 + 1) % 1;
+          const x = width * (.12 + position * .76);
+          drawingContext.strokeStyle = `rgba(244,247,251,${incision.envelope * .46})`;
+          drawingContext.lineWidth = .65;
+          drawingContext.beginPath();
+          drawingContext.moveTo(x, height * .18);
+          drawingContext.lineTo(x, height * .82);
+          drawingContext.stroke();
+          drawingContext.fillStyle = `rgba(244,247,251,${incision.envelope * .32})`;
+          drawingContext.fillRect(x - 8, height * .18, 16, 1);
+          drawingContext.fillRect(x - 5, height * .82, 10, 1);
+        }
+      }
+
+      function drawTextures(now, width, height, audioBrightness, reducedMotion) {
+        for (let index = textures.length - 1; index >= 0; index--) {
+          const texture = textures[index];
+          const age = now - texture.at;
+          if (age > 1300) {
+            textures.splice(index, 1);
+            continue;
+          }
+          const progress = age / 1300;
+          const alpha = Math.pow(1 - progress, 2) * texture.energy * .55;
+          const y = height * (.72 - Math.max(0, Math.min(1, (texture.note - 48) / 24)) * .42);
+          const spread = (reducedMotion ? 12 : 24) + progress * (reducedMotion ? 15 : 65);
+          drawingContext.save();
+          const x = width * (.18 + ((texture.note * .037) % .64));
+          drawingContext.strokeStyle = `rgba(92,225,255,${alpha})`;
+          drawingContext.lineWidth = .55 + audioBrightness * .65;
+          for (let line = -2; line <= 2; line++) {
+            drawingContext.beginPath();
+            drawingContext.ellipse(
+              x,
+              y,
+              spread * (1 + Math.abs(line) * .16),
+              spread * (.32 + Math.abs(line) * .04),
+              0,
+              0,
+              Math.PI * 2
+            );
+            drawingContext.stroke();
+          }
+          drawingContext.beginPath();
+          drawingContext.moveTo(x - spread * 1.45, y);
+          drawingContext.lineTo(x + spread * 1.45, y);
+          drawingContext.moveTo(x, y - spread * .72);
+          drawingContext.lineTo(x, y + spread * .72);
+          drawingContext.stroke();
+          drawingContext.restore();
+        }
+      }
+
+      function drawPlateShape(source, response, phrase, rhythm, frame) {
+        const bounds = boundsFor(source, phrase.responseGesture);
+        const reducedMotion = reducedMotionQuery.matches;
+        const sourcePoints = transformPoints(
+          gesturePoints(source, bounds, frame.width, frame.height),
+          rhythm,
+          frame.width,
+          frame.height,
+          reducedMotion
+        );
+        const responsePoints = transformPoints(
+          gesturePoints(response, bounds, frame.width, frame.height),
+          rhythm,
+          frame.width,
+          frame.height,
+          reducedMotion
+        );
+        const life = phraseLifeMilliseconds(frame.state, phrase);
+        const fadeStart = phrase.cancelledAt ?? phrase.lastAt;
+        const fade = Math.max(0, 1 - (frame.now - fadeStart) / life);
+        const memory = expression('expressionMemory', 0);
+        const lineWidth = .75 + frame.audioEnergy * 1.25;
+
+        drawingContext.save();
+        drawingContext.globalCompositeOperation = 'screen';
+        const sourceLayers = reducedMotion ? 1 : 3;
+        for (let layer = sourceLayers; layer > 0; layer--) {
+          drawPrecisionTrace(sourcePoints, {
+            alpha: fade * (.08 + layer * .055),
+            width: .5 + frame.audioEnergy * .55,
+            offsetY: (layer - 2) * (4 + memory * 3),
+            nodes: layer === 1,
+            stems: layer === 1
+          });
+        }
+        for (let index = 0; index < Math.min(sourcePoints.length, responsePoints.length); index++) {
+          const human = sourcePoints[index];
+          const jev = responsePoints[index];
+          drawingContext.strokeStyle = `rgba(92,225,255,${fade * .105})`;
+          drawingContext.lineWidth = .45;
+          drawingContext.beginPath();
+          drawingContext.moveTo(human.x, human.y);
+          drawingContext.lineTo(jev.x, jev.y);
+          drawingContext.stroke();
+        }
+        const responseColor = phrase.relationship === 'originalReturn'
+          ? '244,247,251'
+          : '92,225,255';
+        const echoes = reducedMotion ? 1 : 5;
+        for (let layer = echoes; layer >= 0; layer--) {
+          const depth = layer / Math.max(1, echoes);
+          drawPrecisionTrace(responsePoints, {
+            alpha: fade * (layer === 0 ? .9 : .035 + (1 - depth) * .08),
+            color: responseColor,
+            width: layer === 0 ? lineWidth + phrase.energy * 1.35 : .55,
+            offsetX: -layer * (3 + memory * 5),
+            offsetY: layer * 2.2,
+            nodes: layer === 0,
+            stems: layer === 0
+          });
+        }
+        if (responsePoints.length) {
+          const head = responsePoints[responsePoints.length - 1];
+          const attackAge = Math.max(0, frame.now - phrase.lastAt);
+          const pulse = Math.min(1, attackAge / 520);
+          drawingContext.strokeStyle = `rgba(92,225,255,${fade * (1 - pulse) * .8})`;
+          drawingContext.lineWidth = .7;
+          drawingContext.beginPath();
+          drawingContext.ellipse(
+            head.x,
+            head.y,
+            5 + pulse * 34,
+            5 + pulse * 18,
+            0,
+            0,
+            Math.PI * 2
+          );
+          drawingContext.stroke();
+          drawingContext.fillStyle = `rgba(92,225,255,${fade * .96})`;
+          drawingContext.beginPath();
+          drawingContext.arc(head.x, head.y, 2 + phrase.energy * 3.5, 0, Math.PI * 2);
+          drawingContext.fill();
+        }
+        drawingContext.restore();
+      }
+
+      function drawLiveHuman(now, rhythm, frame) {
+        const points = liveHumanPoints(now, frame.width, frame.height, frame.state);
+        if (!points.length) return;
+        const shaped = transformPoints(
+          points,
+          rhythm,
+          frame.width,
+          frame.height,
+          reducedMotionQuery.matches
+        );
+        drawingContext.save();
+        drawingContext.globalCompositeOperation = 'screen';
+        const layers = reducedMotionQuery.matches ? 1 : 4;
+        for (let layer = layers; layer >= 0; layer--) {
+          drawPrecisionTrace(shaped, {
+            alpha: layer === 0 ? .78 : .035 + (layers - layer) * .025,
+            width: layer === 0 ? 1 + frame.audioEnergy * 1.3 : .5,
+            offsetX: layer * 3,
+            offsetY: -layer * 2,
+            nodes: layer === 0,
+            stems: layer === 0
+          });
+        }
+        drawingContext.restore();
+      }
+
+      function draw(frame) {
+        if (!frame.width || !frame.height) return;
+        const resonance = Math.max(expression('expressionResonance', .2), frame.audioEnergy * .75);
+        drawingContext.fillStyle = `rgba(3,5,7,${.27 - resonance * .09})`;
+        drawingContext.fillRect(0, 0, frame.width, frame.height);
+        const rhythm = impactState(frame.now);
+        drawKineticGrid(frame, rhythm);
+        drawIncisions(rhythm, frame.width, frame.height);
+        drawLiveHuman(frame.now, rhythm, frame);
+
+        for (const [id, phrase] of phrases) {
+          const life = phraseLifeMilliseconds(frame.state, phrase);
+          if (frame.now - (phrase.cancelledAt ?? phrase.lastAt) > life) {
+            phrases.delete(id);
+            continue;
+          }
+          const source = phrase.sourceGesture.length ? phrase.sourceGesture : phrase.originGesture;
+          drawPlateShape(source, visibleResponse(phrase), phrase, rhythm, frame);
+        }
+        drawTextures(
+          frame.now,
+          frame.width,
+          frame.height,
+          frame.audioBrightness,
+          reducedMotionQuery.matches
+        );
+      }
+
+      return {reset, ingest, draw};
     }
 
     async function command(name) {
@@ -1249,20 +1460,44 @@
     }
 
     function queueVolume(performer, value) {
-      const slider = performer === 'human' ? ui.humanVolume : ui.companionVolume;
-      const output = performer === 'human' ? ui.humanVolumeValue : ui.companionVolumeValue;
+      const slider = performer === 'human' ? ui.humanVolume
+        : performer === 'rhythm' ? ui.drumVolume
+          : performer === 'texture' ? ui.textureVolume : ui.companionVolume;
+      const output = performer === 'human' ? ui.humanVolumeValue
+        : performer === 'rhythm' ? ui.drumVolumeValue
+          : performer === 'texture' ? ui.textureVolumeValue : ui.companionVolumeValue;
       setSlider(slider, output, Number(value));
       clearTimeout(volumeTimers[performer]);
       volumeTimers[performer] = setTimeout(() => command(`volume/${performer}/${value}`), 45);
     }
 
     ui.armButton.addEventListener('click', () => command('start'));
+    ui.startOverlay.addEventListener('click', () => command('start'));
     ui.audioButton.addEventListener('click', () => toggleAudio(false));
     ui.resetButton.addEventListener('click', () => command('stop'));
     ui.humanVolume.addEventListener('input', event => queueVolume('human', event.target.value));
     ui.companionVolume.addEventListener('input', event => queueVolume('companion', event.target.value));
+    ui.drumVolume.addEventListener('input', event => queueVolume('rhythm', event.target.value));
+    ui.textureVolume.addEventListener('input', event => queueVolume('texture', event.target.value));
+    ui.swing.addEventListener('input', event => {
+      setSlider(ui.swing, ui.swingValue, Number(event.target.value));
+      ui.swingValue.value = (0.5 + Number(event.target.value) / 100 * 0.18).toFixed(2);
+      clearTimeout(volumeTimers.swing);
+      volumeTimers.swing = setTimeout(() => command(`groove/swing/${event.target.value}`), 45);
+    });
+    ui.grooveIntensity.addEventListener('input', event => {
+      setSlider(ui.grooveIntensity, ui.grooveIntensityValue, Number(event.target.value));
+      ui.grooveIntensityValue.value = `${event.target.value}%`;
+      clearTimeout(volumeTimers.groove);
+      volumeTimers.groove = setTimeout(() => command(`groove/intensity/${event.target.value}`), 45);
+    });
     ui.audioInput.addEventListener('change', () => {
       if (audioStream) toggleAudio(true);
+    });
+    ui.visualSync.addEventListener('input', event => {
+      visualLatencyMilliseconds = Number(event.target.value);
+      const sign = visualLatencyMilliseconds > 0 ? '+' : '';
+      ui.visualSyncValue.value = `${sign}${visualLatencyMilliseconds} ms`;
     });
     window.addEventListener('resize', resizeCanvas);
     document.addEventListener('visibilitychange', () => {
@@ -1282,16 +1517,22 @@
     });
     requestAnimationFrame(render);
 
-    const events = new EventSource('/events');
-    events.onmessage = event => applyState(JSON.parse(event.data));
-    events.onerror = () => {
-      ui.connection.classList.remove('online');
-      ui.connectionText.textContent = 'Swift disconnected';
-      ui.armButton.disabled = true;
-      ui.resetButton.disabled = true;
-      ui.humanVolume.disabled = true;
-      ui.companionVolume.disabled = true;
-    };
+    if (visualDemoEnabled) {
+      startVisualDemo();
+    } else {
+      const events = new EventSource('/events');
+      events.onmessage = event => applyState(JSON.parse(event.data));
+      events.onerror = () => {
+        ui.connection.classList.remove('online');
+        ui.connectionText.textContent = 'Swift disconnected';
+        document.body.classList.remove('session-ready');
+        ui.armButton.disabled = true;
+        ui.startOverlay.disabled = true;
+        ui.resetButton.disabled = true;
+        ui.humanVolume.disabled = true;
+        ui.companionVolume.disabled = true;
+      };
+    }
   </script>
 </body>
 </html>

@@ -25,6 +25,7 @@ jobs:
           sed -n '/<script>/,/<\/script>/p' Sources/JevBassistCLI/Resources/index.html \
             | sed '1d;$d' > "$RUNNER_TEMP/jev-bassist-ui.js"
           node --check "$RUNNER_TEMP/jev-bassist-ui.js"
+          node Tests/visual_demo_smoke.js
       - name: Test
         run: swift test
       - name: Test memory safety

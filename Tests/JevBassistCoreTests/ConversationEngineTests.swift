@@ -119,7 +119,7 @@ final class ConversationEngineTests: XCTestCase {
 
         XCTAssertEqual(plan.decisionSource, .jev)
         XCTAssertEqual(plan.conversationLineage?.relationship, .inversion)
-        XCTAssertEqual(plan.phrase.startMicroseconds, 2_500_000)
+        XCTAssertEqual(plan.phrase.startMicroseconds, 2_375_000)
     }
 
     func testRemoteDeadlineExpiresRevisionAndUsesLocalCandidate() throws {
@@ -135,12 +135,38 @@ final class ConversationEngineTests: XCTestCase {
         )
 
         XCTAssertNil(engine.submit(motif(), availableAtMicroseconds: 2_215_000))
-        XCTAssertNil(engine.advance(through: 2_399_999))
-        let plan = try XCTUnwrap(engine.advance(through: 2_400_000))
+        XCTAssertNil(engine.advance(through: 2_314_999))
+        let plan = try XCTUnwrap(engine.advance(through: 2_315_000))
 
         XCTAssertEqual(plan.decisionSource, .fallback)
         XCTAssertEqual(plan.conversationLineage?.relationship, .echo)
         XCTAssertEqual(provider.expiredRevisions, [1])
+    }
+
+    func testGrooveConversationUsesFineSwungResponseGrid() throws {
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3,
+            grooveTiming: GrooveTiming(swing: 0.6, strength: 0.72)
+        )
+
+        let plan = try XCTUnwrap(engine.submit(
+            motif(),
+            availableAtMicroseconds: 2_215_000
+        ))
+
+        XCTAssertEqual(plan.phrase.startMicroseconds, 2_300_000)
+        XCTAssertLessThan(plan.phrase.startMicroseconds - 2_215_000, 100_000)
+        XCTAssertEqual(
+            plan.phrase.messages
+                .filter { $0.kind == .noteOn }
+                .map(\.offsetMicroseconds),
+            [2_300_000, 2_650_000, 3_150_000]
+        )
     }
 
     func testHumanAttackDoesNotErasePendingPhraseDecision() throws {

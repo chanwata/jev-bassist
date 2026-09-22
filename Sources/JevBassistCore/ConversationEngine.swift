@@ -1051,6 +1051,7 @@ public struct ConversationEngine: Sendable {
     public let musicalStateConfiguration: MusicalStateConfiguration
     public let mode: MusicalMode
     public let outputChannel: UInt8
+    public private(set) var grooveTiming: GrooveTiming?
 
     private let generator = ResponseCandidateGenerator()
     private let arbiter = ResponseArbiter()
@@ -1082,11 +1083,13 @@ public struct ConversationEngine: Sendable {
         musicalStateConfiguration: MusicalStateConfiguration,
         mode: MusicalMode,
         outputChannel: UInt8,
+        grooveTiming: GrooveTiming? = nil,
         decisionProvider: any ConversationDecisionProvider = LocalConversationDecisionProvider()
     ) {
         self.musicalStateConfiguration = musicalStateConfiguration
         self.mode = mode
         self.outputChannel = outputChannel
+        self.grooveTiming = grooveTiming
         self.decisionProvider = decisionProvider
     }
 
@@ -1099,8 +1102,11 @@ public struct ConversationEngine: Sendable {
             availableAtMicroseconds ?? motif.finalizedAtMicroseconds
         )
         guard let prepared = prepareConversation(for: motif) else { return nil }
-        let selected = prepared.localSelection
         let start = nextBeat(after: availableAt, beat: beatMicroseconds)
+        let selected = placingOnSharedGrid(
+            prepared.localSelection,
+            startMicroseconds: start
+        )
         let plan = finalize(
             motif: motif,
             selected: selected,
@@ -1126,6 +1132,10 @@ public struct ConversationEngine: Sendable {
             self.pendingConversation = nil
         }
         guard let prepared = prepareConversation(for: motif) else { return nil }
+        let responseStart = responseOpportunity(after: availableAtMicroseconds)
+        let candidates = prepared.candidates.map {
+            placingOnSharedGrid($0, startMicroseconds: responseStart)
+        }
         let revision = nextRevision
         nextRevision += 1
         let input = ConversationSelectionInput(
@@ -1134,7 +1144,7 @@ public struct ConversationEngine: Sendable {
             originMotifID: prepared.originMotifID,
             sourceMotifID: motif.id,
             context: prepared.developmentContext,
-            candidates: prepared.candidates.map(ConversationCandidateSummary.init),
+            candidates: candidates.map(ConversationCandidateSummary.init),
             localCandidateID: prepared.localSelection.id,
             tonalCenterPitchClass: prepared.tonalCenterPitchClass,
             tonalCenterConfidence: tonalCenterConfidence,
@@ -1146,28 +1156,26 @@ public struct ConversationEngine: Sendable {
         )
         decisionProvider.prepare(input)
         if let resolution = decisionProvider.resolution(for: input),
-           let selected = prepared.candidates.first(where: {
+           let selected = candidates.first(where: {
                $0.id == resolution.candidateID
            }) {
-            let start = responseOpportunity(after: availableAtMicroseconds)
             return finalize(
                 motif: motif,
                 selected: selected,
                 tonalCenterPitchClass: prepared.tonalCenterPitchClass,
-                startMicroseconds: start,
+                startMicroseconds: responseStart,
                 decisionSource: resolution.source
             )
         }
 
-        let responseStart = responseOpportunity(after: availableAtMicroseconds)
         pendingConversation = PendingConversation(
             motif: motif,
             tonalCenterPitchClass: prepared.tonalCenterPitchClass,
-            candidates: prepared.candidates,
+            candidates: candidates,
             selectionInput: input,
             responseStartMicroseconds: responseStart,
-            selectionDeadlineMicroseconds: responseStart > 100_000
-                ? responseStart - 100_000
+            selectionDeadlineMicroseconds: responseStart > 60_000
+                ? responseStart - 60_000
                 : 0
         )
         return nil
@@ -1200,9 +1208,13 @@ public struct ConversationEngine: Sendable {
         let start = offsetMicroseconds <= pending.responseStartMicroseconds
             ? pending.responseStartMicroseconds
             : responseOpportunity(after: offsetMicroseconds)
+        let alignedSelection = placingOnSharedGrid(
+            selected,
+            startMicroseconds: start
+        )
         return finalize(
             motif: pending.motif,
-            selected: selected,
+            selected: alignedSelection,
             tonalCenterPitchClass: pending.tonalCenterPitchClass,
             startMicroseconds: start,
             decisionSource: source
@@ -1211,6 +1223,10 @@ public struct ConversationEngine: Sendable {
 
     public mutating func yieldToHuman() {
         turnState = .overlapping
+    }
+
+    public mutating func setGrooveTiming(_ timing: GrooveTiming?) {
+        grooveTiming = timing
     }
 
     public mutating func observeHumanGesture(_ observation: PhraseObservation) {
@@ -1466,10 +1482,15 @@ public struct ConversationEngine: Sendable {
             pitchContext: context,
             previousResponse: previousResponseNotes
         )
-        let selected = candidates.first { $0.relationship == .fragmentation }
+        let rawSelection = candidates.first { $0.relationship == .fragmentation }
             ?? candidates.first { $0.relationship == .tailVariation }
             ?? candidates.first { $0.relationship == .hold }
-        guard let selected else { return nil }
+        guard let rawSelection else { return nil }
+        let start = responseOpportunity(after: offset)
+        let selected = placingOnSharedGrid(
+            rawSelection,
+            startMicroseconds: start
+        )
         spontaneousProposalUsed = true
         currentIntent = .question
         turnState = .preparing
@@ -1477,7 +1498,7 @@ public struct ConversationEngine: Sendable {
             motif: source,
             selected: selected,
             tonalCenterPitchClass: center,
-            startMicroseconds: responseOpportunity(after: offset),
+            startMicroseconds: start,
             decisionSource: .rules
         )
     }
@@ -1657,11 +1678,57 @@ public struct ConversationEngine: Sendable {
     }
 
     private func responseOpportunity(after offset: UInt64) -> UInt64 {
-        let minimum = offset.addingReportingOverflow(80_000)
+        let minimum = offset.addingReportingOverflow(60_000)
         let safeMinimum = minimum.overflow ? UInt64.max : minimum.partialValue
-        let subdivision = beatMicroseconds * 0.5
-        let index = ceil(Double(safeMinimum) / subdivision)
-        return UInt64(min(Double(UInt64.max), (index * subdivision).rounded()))
+        guard let grooveTiming else {
+            let subdivision = beatMicroseconds * 0.25
+            let index = ceil(Double(safeMinimum) / subdivision)
+            return UInt64(min(Double(UInt64.max), (index * subdivision).rounded()))
+        }
+        let beat = Double(safeMinimum) / beatMicroseconds
+        let opportunity = grooveTiming.nextConversationOpportunity(
+            after: beat,
+            minimumLeadBeats: 0
+        )
+        return UInt64(min(Double(UInt64.max), (opportunity * beatMicroseconds).rounded()))
+    }
+
+    private func placingOnSharedGrid(
+        _ candidate: ConversationResponseCandidate,
+        startMicroseconds: UInt64
+    ) -> ConversationResponseCandidate {
+        guard let grooveTiming, !candidate.notes.isEmpty else { return candidate }
+        let sharedGrid = GrooveTiming(swing: grooveTiming.swing, strength: 1)
+        let startBeat = Double(startMicroseconds) / beatMicroseconds
+        var previousAbsoluteBeat = -Double.infinity
+        let notes = candidate.notes.sorted {
+            $0.relativeOnsetBeats < $1.relativeOnsetBeats
+        }.map { note in
+            let requestedAbsoluteBeat = startBeat + note.relativeOnsetBeats
+            var absoluteBeat = sharedGrid.alignedConversationBeat(
+                requestedAbsoluteBeat
+            )
+            if absoluteBeat <= previousAbsoluteBeat + 0.001 {
+                absoluteBeat = sharedGrid.nextConversationOpportunity(
+                    after: previousAbsoluteBeat,
+                    minimumLeadBeats: 0.001
+                )
+            }
+            previousAbsoluteBeat = absoluteBeat
+            return ConversationResponseNote(
+                sourceNoteID: note.sourceNoteID,
+                note: note.note,
+                velocity: note.velocity,
+                relativeOnsetBeats: max(0, absoluteBeat - startBeat),
+                durationBeats: note.durationBeats
+            )
+        }
+        return ConversationResponseCandidate(
+            id: candidate.id,
+            relationship: candidate.relationship,
+            notes: notes,
+            score: candidate.score
+        )
     }
 
     private func decision(for relationship: ConversationRelationship) -> BassDecision {

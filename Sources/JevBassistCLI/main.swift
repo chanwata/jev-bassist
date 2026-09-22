@@ -42,6 +42,13 @@ private struct JamOptions: Sendable {
     let mode: MusicalMode?
     let humanVolume: UInt8
     let companionVolume: UInt8
+    let groove: GrooveStyle
+    let swing: Double
+    let grooveIntensity: Double
+    let drumChannel: UInt8
+    let textureChannel: UInt8
+    let drumVolume: UInt8
+    let textureVolume: UInt8
 }
 
 private enum Command {
@@ -233,7 +240,9 @@ private enum Command {
             allowed: [
                 "--source", "--destination", "--bpm", "--beats-per-bar",
                 "--input-channel", "--output-channel", "--intro-bars", "--brain",
-                "--progression", "--style", "--mode", "--human-volume", "--companion-volume"
+                "--progression", "--style", "--mode", "--human-volume", "--companion-volume",
+                "--groove", "--swing", "--groove-intensity", "--drum-channel",
+                "--texture-channel", "--drum-volume", "--texture-volume"
             ],
             usage: "jam --source NAME --destination NAME [options]"
         )
@@ -259,6 +268,34 @@ private enum Command {
             name: "--companion-volume",
             default: 72
         )
+        let grooveName = options["--groove"] ?? GrooveStyle.off.rawValue
+        guard let groove = GrooveStyle(rawValue: grooveName) else {
+            throw CLIError.invalidArguments("--groove must be 'off' or 'riot'.")
+        }
+        let swing = try doubleOption(options, name: "--swing", default: 0.58)
+        guard swing.isFinite, (0.5...0.68).contains(swing) else {
+            throw CLIError.invalidArguments("--swing must be between 0.50 and 0.68.")
+        }
+        let grooveIntensity = try doubleOption(
+            options,
+            name: "--groove-intensity",
+            default: 0.65
+        )
+        guard grooveIntensity.isFinite, (0...1).contains(grooveIntensity) else {
+            throw CLIError.invalidArguments("--groove-intensity must be between 0 and 1.")
+        }
+        let drumChannel = try channelOption(options, name: "--drum-channel", default: 10)
+        let textureChannel = try channelOption(options, name: "--texture-channel", default: 2)
+        let drumVolume = try midiValueOption(options, name: "--drum-volume", default: 62)
+        let textureVolume = try midiValueOption(options, name: "--texture-volume", default: 50)
+        if groove == .riot {
+            let channels = [inputChannel, outputChannel, drumChannel, textureChannel]
+            guard Set(channels).count == channels.count else {
+                throw CLIError.invalidArguments(
+                    "Riot groove requires distinct input, companion, drum, and texture channels."
+                )
+            }
+        }
         let brainName = options["--brain"] ?? BrainMode.rules.rawValue
         guard let brain = BrainMode(rawValue: brainName) else {
             throw CLIError.invalidArguments("--brain must be 'rules' or 'jev'.")
@@ -296,7 +333,10 @@ private enum Command {
             outputChannel: outputChannel,
             progression: progression,
             style: style,
-            mode: mode
+            mode: mode,
+            grooveTiming: groove == .riot
+                ? GrooveTiming(swing: swing, strength: 1)
+                : nil
         )
         return JamOptions(
             source: source,
@@ -312,7 +352,14 @@ private enum Command {
             style: style,
             mode: mode,
             humanVolume: humanVolume,
-            companionVolume: companionVolume
+            companionVolume: companionVolume,
+            groove: groove,
+            swing: swing,
+            grooveIntensity: grooveIntensity,
+            drumChannel: drumChannel,
+            textureChannel: textureChannel,
+            drumVolume: drumVolume,
+            textureVolume: textureVolume
         )
     }
 
@@ -423,7 +470,7 @@ USAGE
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist evaluate INPUT OUTPUT [--bpm BPM] [--beats-per-bar N] [--intro-bars N] [--output-channel N] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS] [--ui]
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS] [--groove off|riot] [--swing 0.50...0.68] [--groove-intensity 0...1] [--drum-channel N] [--texture-channel N] [--drum-volume 0...127] [--texture-volume 0...127] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -686,6 +733,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private let stateHandler: @Sendable (JamWebState) -> Void
     private var engine: LocalBassistEngine
     private var scheduler: RollingMIDIScheduler
+    private var grooveScheduler: RollingMIDIScheduler
+    private var grooveGenerator: RiotGrooveGenerator?
     private var schedulerLineage: [UInt64: ConversationLineage] = [:]
     private var pendingConversationAcknowledgements: [PendingConversationAcknowledgement] = []
     private var anchorHostTime: UInt64?
@@ -698,10 +747,17 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var lastDecisionSource: String?
     private var lastDevelopmentStage: String?
     private var lastTonalCenter: String?
+    private var lastTonalCenterPitchClass: UInt8?
     private var lastNote: String?
     private var lastExpression: EnsembleExpression = .quiet
     private var humanVolume: UInt8
     private var companionVolume: UInt8
+    private var drumVolume: UInt8
+    private var textureVolume: UInt8
+    private var swing: Double
+    private var grooveIntensity: Double
+    private var latestHumanDensity = 0.0
+    private var nextGrooveBarIndex = 0
     private var visualEvents: [JamVisualEvent] = []
     private var nextVisualEventID: UInt64 = 1
 
@@ -719,13 +775,27 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             ? options.companionVolume
             : options.humanVolume
         companionVolume = options.companionVolume
+        drumVolume = options.drumVolume
+        textureVolume = options.textureVolume
+        swing = options.swing
+        grooveIntensity = options.grooveIntensity
         scheduler = try RollingMIDIScheduler(
+            horizonMicroseconds: Self.schedulingHorizonMicroseconds
+        )
+        grooveScheduler = try RollingMIDIScheduler(
             horizonMicroseconds: Self.schedulingHorizonMicroseconds
         )
         let musicalState = try MusicalStateConfiguration(
             tempoBPM: options.tempoBPM,
             beatsPerBar: options.beatsPerBar
         )
+        grooveGenerator = options.groove == .riot
+            ? RiotGrooveGenerator(
+                musicalState: musicalState,
+                drumChannel: options.drumChannel,
+                textureChannel: options.textureChannel
+            )
+            : nil
         let decisionProvider: any BassDecisionProvider
         let conversationDecisionProvider: any ConversationDecisionProvider
         switch options.brain {
@@ -761,7 +831,10 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 outputChannel: options.outputChannel,
                 progression: options.progression,
                 style: options.style,
-                mode: options.mode
+                mode: options.mode,
+                grooveTiming: options.groove == .riot
+                    ? GrooveTiming(swing: options.swing, strength: 1)
+                    : nil
             ),
             decisionProvider: decisionProvider,
             conversationDecisionProvider: conversationDecisionProvider
@@ -776,6 +849,18 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 controller: 7,
                 value: companionVolume,
                 channel: options.outputChannel
+            )
+        }
+        if options.groove == .riot {
+            try output.sendControlChange(
+                controller: 7,
+                value: drumVolume,
+                channel: options.drumChannel
+            )
+            try output.sendControlChange(
+                controller: 7,
+                value: textureVolume,
+                channel: options.textureChannel
             )
         }
     }
@@ -806,6 +891,39 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         }
     }
 
+    func setDrumVolumeFromWeb(_ value: UInt8) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            setVolume(value, channel: options.drumChannel)
+        }
+    }
+
+    func setTextureVolumeFromWeb(_ value: UInt8) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            setVolume(value, channel: options.textureChannel)
+        }
+    }
+
+    func setSwingFromWeb(_ value: UInt8) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            swing = 0.5 + Double(min(value, 100)) / 100 * 0.18
+            engine.setConversationGrooveTiming(
+                GrooveTiming(swing: swing, strength: 1)
+            )
+            publishState(elapsedMicroseconds: currentElapsedMicroseconds())
+        }
+    }
+
+    func setGrooveIntensityFromWeb(_ value: UInt8) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            grooveIntensity = Double(min(value, 100)) / 100
+            publishState(elapsedMicroseconds: currentElapsedMicroseconds())
+        }
+    }
+
     func publishInitialState() {
         queue.async { [weak self] in
             self?.publishState(elapsedMicroseconds: nil)
@@ -822,10 +940,16 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             timer = nil
             engine.cancelPendingDecisions()
             _ = scheduler.cancelAllPending()
-            do {
-                try output.stop(channel: options.outputChannel)
-            } catch {
-                failureDescription = failureDescription ?? String(describing: error)
+            _ = grooveScheduler.cancelAllPending()
+            let channels = options.groove == .riot
+                ? [options.outputChannel, options.drumChannel, options.textureChannel]
+                : [options.outputChannel]
+            for channel in channels {
+                do {
+                    try output.stop(channel: channel)
+                } catch {
+                    failureDescription = failureDescription ?? String(describing: error)
+                }
             }
             publishState(elapsedMicroseconds: nil)
             return failureDescription
@@ -938,6 +1062,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             : 0
         do {
             acknowledgeElapsedConversationNotes(through: safeElapsed)
+            scheduleGroove(through: safeElapsed)
             try process(
                 engine.advance(through: safeElapsed),
                 anchorHostTime: anchorHostTime,
@@ -960,6 +1085,9 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         anchorHostTime: UInt64,
         currentOffsetMicroseconds: UInt64
     ) throws {
+        if let latest = update.snapshots.last {
+            latestHumanDensity = latest.state.noteDensityPerBeat
+        }
         for snapshot in update.snapshots where snapshot.boundary == .bar {
             print(format(snapshot))
             lastChord = snapshot.state.chordCandidates.first?.displayName
@@ -991,6 +1119,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             lastDecisionSource = plan.decisionSource.rawValue
             lastDevelopmentStage = plan.developmentStage?.rawValue
             lastTonalCenter = plan.tonalCenterPitchClass.map(pitchClassName)
+            lastTonalCenterPitchClass = plan.tonalCenterPitchClass
             lastExpression = plan.expression
             if !plan.phrase.messages.isEmpty {
                 let revision = scheduler.submit(plan.phrase.messages)
@@ -1007,6 +1136,60 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             currentOffsetMicroseconds: currentOffsetMicroseconds,
             anchorHostTime: anchorHostTime
         )
+        try sendDueGrooveEvents(
+            currentOffsetMicroseconds: currentOffsetMicroseconds,
+            anchorHostTime: anchorHostTime
+        )
+    }
+
+    private func scheduleGroove(through offset: UInt64) {
+        guard let grooveGenerator else { return }
+        let barMicroseconds = UInt64(
+            (Double(options.beatsPerBar) * 60_000_000 / options.tempoBPM).rounded()
+        )
+        let lookAhead = offset.addingReportingOverflow(100_000)
+        let through = lookAhead.overflow ? UInt64.max : lookAhead.partialValue
+        while UInt64(nextGrooveBarIndex) * barMicroseconds <= through {
+            let plan = grooveGenerator.plan(
+                barIndex: nextGrooveBarIndex,
+                humanDensity: latestHumanDensity,
+                tonalCenterPitchClass: lastTonalCenterPitchClass,
+                mode: options.mode,
+                swing: swing,
+                intensity: grooveIntensity
+            )
+            if !plan.messages.isEmpty {
+                _ = grooveScheduler.submit(plan.messages)
+            }
+            nextGrooveBarIndex += 1
+        }
+    }
+
+    private func sendDueGrooveEvents(
+        currentOffsetMicroseconds: UInt64,
+        anchorHostTime: UInt64
+    ) throws {
+        let due = try grooveScheduler.drain(through: currentOffsetMicroseconds)
+        guard !due.isEmpty else { return }
+        let outputAnchor = MIDIHostTime.addingMicroseconds(
+            Self.outputSafetyOffsetMicroseconds,
+            to: anchorHostTime
+        )
+        try output.schedule(due.map(\.message), anchorHostTime: outputAnchor)
+        guard options.webUI else { return }
+        for event in due {
+            let message = event.message
+            appendVisualEvent(
+                performer: message.channel == options.drumChannel ? "rhythm" : "texture",
+                kind: message.kind.rawValue,
+                note: message.note,
+                velocity: message.velocity,
+                sessionOffsetMicroseconds: message.offsetMicroseconds
+                    + Self.outputSafetyOffsetMicroseconds,
+                noteID: event.noteID
+            )
+        }
+        publishState(elapsedMicroseconds: currentOffsetMicroseconds)
     }
 
     private func sendDueEvents(
@@ -1051,7 +1234,12 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                     sessionOffsetMicroseconds: message.offsetMicroseconds
                         + Self.outputSafetyOffsetMicroseconds,
                     noteID: event.noteID,
-                    lineage: schedulerLineage[event.revision]
+                    responseNoteIndex: schedulerLineage[event.revision] == nil
+                        ? nil
+                        : event.noteOnIndex,
+                    lineage: message.kind == .noteOn
+                        ? schedulerLineage[event.revision]
+                        : nil
                 )
             }
             publishState(elapsedMicroseconds: currentOffsetMicroseconds)
@@ -1111,8 +1299,15 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 lastNote: lastNote,
                 humanChannel: options.inputChannel,
                 companionChannel: options.outputChannel,
+                drumChannel: options.drumChannel,
+                textureChannel: options.textureChannel,
                 humanVolume: humanVolume,
                 companionVolume: companionVolume,
+                drumVolume: drumVolume,
+                textureVolume: textureVolume,
+                groove: options.groove.rawValue,
+                swing: swing,
+                grooveIntensity: grooveIntensity,
                 expressionMemory: lastExpression.memory,
                 expressionTension: lastExpression.tension,
                 expressionActivity: lastExpression.activity,
@@ -1133,8 +1328,12 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 companionVolume = value
             } else if channel == options.inputChannel {
                 humanVolume = value
-            } else {
+            } else if channel == options.outputChannel {
                 companionVolume = value
+            } else if channel == options.drumChannel {
+                drumVolume = value
+            } else if channel == options.textureChannel {
+                textureVolume = value
             }
             publishState(elapsedMicroseconds: currentElapsedMicroseconds())
         } catch {
@@ -1156,6 +1355,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         velocity: UInt8,
         sessionOffsetMicroseconds: UInt64,
         noteID: UInt64? = nil,
+        responseNoteIndex: Int? = nil,
         lineage: ConversationLineage? = nil
     ) {
         guard let startedAt else {
@@ -1166,6 +1366,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 sessionID: sessionID,
                 id: nextVisualEventID,
                 noteID: noteID,
+                responseNoteIndex: responseNoteIndex,
                 performer: performer,
                 kind: kind,
                 note: note,
@@ -1189,8 +1390,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             )
         )
         nextVisualEventID += 1
-        if visualEvents.count > 64 {
-            visualEvents.removeFirst(visualEvents.count - 64)
+        if visualEvents.count > 256 {
+            visualEvents.removeFirst(visualEvents.count - 256)
         }
     }
 
@@ -1211,7 +1412,13 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         timer?.cancel()
         timer = nil
         engine.cancelPendingDecisions()
+        _ = scheduler.cancelAllPending()
+        _ = grooveScheduler.cancelAllPending()
         try? output.stop(channel: options.outputChannel)
+        if options.groove == .riot {
+            try? output.stop(channel: options.drumChannel)
+            try? output.stop(channel: options.textureChannel)
+        }
         publishState(elapsedMicroseconds: nil)
         stopSignal()
     }
@@ -1252,8 +1459,21 @@ private func runJam(_ options: JamOptions) throws {
     let mode = options.mode.map { " · mode \($0.rawValue)" } ?? ""
     print("Style: \(options.style.rawValue)\(mode).")
     print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
+    if options.groove == .riot {
+        print(
+            "Groove: riot · swing \(String(format: "%.2f", options.swing)) · "
+                + "intensity \(String(format: "%.2f", options.grooveIntensity)) · "
+                + "keys CH\(options.textureChannel) · box CH\(options.drumChannel)."
+        )
+        print(
+            "Groove mix: keys=\(options.textureVolume), box=\(options.drumVolume). "
+                + "The rhythm box starts with the shared clock."
+        )
+    }
     if !options.progression.isEmpty {
         print("Harmony: \(options.progression.map(\.displayName).joined(separator: " → ")) (loops after the intro).")
+    } else if options.style == .fugue, let mode = options.mode {
+        print("Harmony: inferred tonal center in \(mode.rawValue) mode.")
     } else {
         print("Harmony: live detection (experimental, one-bar response).")
     }
@@ -1280,7 +1500,7 @@ private func runJam(_ options: JamOptions) throws {
         throw CLIError.liveSession(failure)
     }
     webServer?.stop()
-    print("Stopped; pending MIDI was flushed and output channel \(options.outputChannel) was silenced.")
+    print("Stopped; pending MIDI was flushed and all configured output parts were silenced.")
 }
 
 do {
