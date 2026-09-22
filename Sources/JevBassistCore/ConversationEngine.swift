@@ -1473,10 +1473,10 @@ public struct ConversationEngine: Sendable {
             pitchContext: context,
             previousResponse: previousResponseNotes
         )
-        let selected = candidates.first { $0.relationship == .fragmentation }
+        let rawSelection = candidates.first { $0.relationship == .fragmentation }
             ?? candidates.first { $0.relationship == .tailVariation }
             ?? candidates.first { $0.relationship == .hold }
-        guard let rawSelection = selected else { return nil }
+        guard let rawSelection else { return nil }
         let selected = applyingGroove(to: rawSelection)
         spontaneousProposalUsed = true
         currentIntent = .question
