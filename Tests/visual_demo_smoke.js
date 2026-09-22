@@ -9,13 +9,18 @@ let now = 0;
 let frames = [];
 let strokes = 0;
 let fills = 0;
+const strokeStyles = new Set();
 const gradient = {addColorStop() {}};
 const context = new Proxy({
   setTransform() {}, fillRect() { fills += 1; }, beginPath() {}, moveTo() {},
   lineTo() {}, bezierCurveTo() {}, quadraticCurveTo() {}, stroke() { strokes += 1; },
   arc() {}, ellipse() {}, fill() { fills += 1; }, save() {}, restore() {},
   createLinearGradient() { return gradient; }, createRadialGradient() { return gradient; }
-}, {set(target, property, value) { target[property] = value; return true; }});
+}, {set(target, property, value) {
+  target[property] = value;
+  if (property === 'strokeStyle') strokeStyles.add(String(value));
+  return true;
+}});
 
 function element(id = '') {
   const children = [];
@@ -60,6 +65,12 @@ for (let index = 0; index < 460; index++) {
 
 if (strokes < 500) throw new Error(`shared plate did not draw enough structure: ${strokes}`);
 if (fills < 100) throw new Error(`shared plate did not maintain its field: ${fills}`);
+if (![...strokeStyles].some(value => value.includes('92,225,255'))) {
+  throw new Error('companion signal color was not rendered');
+}
+if (![...strokeStyles].some(value => value.includes('255,54,94'))) {
+  throw new Error('downbeat signal color was not rendered');
+}
 if (elements.get('startOverlay').disabled !== true) {
   throw new Error('visual demo must not expose the live Start control');
 }

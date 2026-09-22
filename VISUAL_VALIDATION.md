@@ -1,4 +1,4 @@
-# Shared surface validation
+# Kinetic score validation
 
 The shared engraved surface is evaluated separately for rendering correctness, synchronization, and aesthetic/musical fit. Automated checks cannot establish that a visual is compelling.
 
@@ -20,14 +20,15 @@ Keep the JD-Xi program, tempo, mode, volumes, audio-input choice, room, browser 
 
 | Scenario | Expected visual evidence |
 | --- | --- |
-| Rhythm box only | Kick compresses the whole surface briefly; rim shears; hi-hat makes a small incision. No melodic contour is invented. |
-| Short phrase and imitation | The human contour remains recognizable and the sounded companion prefix grows in the same coordinate system. |
+| Rhythm box only | The perspective grid breathes on kick, shears on rim, and receives a brief incision on hi-hat. No melodic contour is invented. |
+| Short phrase and imitation | The white human trace remains recognizable; the cyan sounded prefix grows in the same coordinate system with sparse correspondence vectors. |
 | Sequence or inversion | The difference comes from actual response pitches and timing. The relationship label changes presentation only. |
 | Human re-entry | Unsent response notes never appear. Already sounded response geometry remains and fades. |
 | Dense playing | The surface remains legible and bounded instead of whitening through additive effects. |
 | Silence | Percussion transients stop quickly; phrase memory fades over tempo-relative beats; the field settles. |
 | Browser reconnect | Retained phrase geometry returns without replaying historical attacks. |
 | Reduced motion | Phrase identity remains visible with fewer layers and smaller deformations. |
+| Reply timing | After a clearly released phrase, the response enters on the next fine shared subdivision rather than waiting for the next eighth-note slot. |
 
 ## Rating
 

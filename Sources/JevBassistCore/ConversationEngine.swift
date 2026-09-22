@@ -1169,8 +1169,8 @@ public struct ConversationEngine: Sendable {
             candidates: prepared.candidates,
             selectionInput: input,
             responseStartMicroseconds: responseStart,
-            selectionDeadlineMicroseconds: responseStart > 100_000
-                ? responseStart - 100_000
+            selectionDeadlineMicroseconds: responseStart > 60_000
+                ? responseStart - 60_000
                 : 0
         )
         return nil
@@ -1665,15 +1665,18 @@ public struct ConversationEngine: Sendable {
     }
 
     private func responseOpportunity(after offset: UInt64) -> UInt64 {
-        let minimum = offset.addingReportingOverflow(80_000)
+        let minimum = offset.addingReportingOverflow(60_000)
         let safeMinimum = minimum.overflow ? UInt64.max : minimum.partialValue
         guard let grooveTiming else {
-            let subdivision = beatMicroseconds * 0.5
+            let subdivision = beatMicroseconds * 0.25
             let index = ceil(Double(safeMinimum) / subdivision)
             return UInt64(min(Double(UInt64.max), (index * subdivision).rounded()))
         }
         let beat = Double(safeMinimum) / beatMicroseconds
-        let opportunity = grooveTiming.nextOpportunity(after: beat, minimumLeadBeats: 0)
+        let opportunity = grooveTiming.nextConversationOpportunity(
+            after: beat,
+            minimumLeadBeats: 0
+        )
         return UInt64(min(Double(UInt64.max), (opportunity * beatMicroseconds).rounded()))
     }
 

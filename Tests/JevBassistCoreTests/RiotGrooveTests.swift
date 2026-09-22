@@ -80,6 +80,10 @@ final class RiotGrooveTests: XCTestCase {
         let timing = GrooveTiming(swing: 0.6, strength: 0.75)
 
         XCTAssertEqual(timing.nextOpportunity(after: 1.1, minimumLeadBeats: 0), 1.6)
+        XCTAssertEqual(
+            timing.nextConversationOpportunity(after: 1.1, minimumLeadBeats: 0),
+            1.3
+        )
         XCTAssertEqual(timing.alignedBeat(0.52), 0.58, accuracy: 0.0001)
         XCTAssertEqual(timing.alignedBeat(1), 1, accuracy: 0.0001)
     }

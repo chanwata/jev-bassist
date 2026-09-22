@@ -16,15 +16,15 @@ final class PhraseMemoryTests: XCTestCase {
             try segmenter.advance(through: 2_000_000, hasActiveNotes: false).isEmpty
         )
         XCTAssertTrue(
-            try segmenter.advance(through: 2_549_999, hasActiveNotes: false).isEmpty
+            try segmenter.advance(through: 2_474_999, hasActiveNotes: false).isEmpty
         )
         let observation = try XCTUnwrap(
-            segmenter.advance(through: 2_550_000, hasActiveNotes: false).first
+            segmenter.advance(through: 2_475_000, hasActiveNotes: false).first
         )
 
         XCTAssertEqual(observation.notes.map(\.id), [1, 2])
         XCTAssertEqual(observation.melodyNotes.map(\.note), [62, 65])
-        XCTAssertEqual(observation.finalizedAtMicroseconds, 2_550_000)
+        XCTAssertEqual(observation.finalizedAtMicroseconds, 2_475_000)
     }
 
     func testSimultaneousChordDoesNotBecomeThreeNoteMelody() throws {
