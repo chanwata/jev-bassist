@@ -1102,8 +1102,11 @@ public struct ConversationEngine: Sendable {
             availableAtMicroseconds ?? motif.finalizedAtMicroseconds
         )
         guard let prepared = prepareConversation(for: motif) else { return nil }
-        let selected = prepared.localSelection
         let start = nextBeat(after: availableAt, beat: beatMicroseconds)
+        let selected = placingOnSharedGrid(
+            prepared.localSelection,
+            startMicroseconds: start
+        )
         let plan = finalize(
             motif: motif,
             selected: selected,
@@ -1129,6 +1132,10 @@ public struct ConversationEngine: Sendable {
             self.pendingConversation = nil
         }
         guard let prepared = prepareConversation(for: motif) else { return nil }
+        let responseStart = responseOpportunity(after: availableAtMicroseconds)
+        let candidates = prepared.candidates.map {
+            placingOnSharedGrid($0, startMicroseconds: responseStart)
+        }
         let revision = nextRevision
         nextRevision += 1
         let input = ConversationSelectionInput(
@@ -1137,7 +1144,7 @@ public struct ConversationEngine: Sendable {
             originMotifID: prepared.originMotifID,
             sourceMotifID: motif.id,
             context: prepared.developmentContext,
-            candidates: prepared.candidates.map(ConversationCandidateSummary.init),
+            candidates: candidates.map(ConversationCandidateSummary.init),
             localCandidateID: prepared.localSelection.id,
             tonalCenterPitchClass: prepared.tonalCenterPitchClass,
             tonalCenterConfidence: tonalCenterConfidence,
@@ -1149,24 +1156,22 @@ public struct ConversationEngine: Sendable {
         )
         decisionProvider.prepare(input)
         if let resolution = decisionProvider.resolution(for: input),
-           let selected = prepared.candidates.first(where: {
+           let selected = candidates.first(where: {
                $0.id == resolution.candidateID
            }) {
-            let start = responseOpportunity(after: availableAtMicroseconds)
             return finalize(
                 motif: motif,
                 selected: selected,
                 tonalCenterPitchClass: prepared.tonalCenterPitchClass,
-                startMicroseconds: start,
+                startMicroseconds: responseStart,
                 decisionSource: resolution.source
             )
         }
 
-        let responseStart = responseOpportunity(after: availableAtMicroseconds)
         pendingConversation = PendingConversation(
             motif: motif,
             tonalCenterPitchClass: prepared.tonalCenterPitchClass,
-            candidates: prepared.candidates,
+            candidates: candidates,
             selectionInput: input,
             responseStartMicroseconds: responseStart,
             selectionDeadlineMicroseconds: responseStart > 60_000
@@ -1203,9 +1208,13 @@ public struct ConversationEngine: Sendable {
         let start = offsetMicroseconds <= pending.responseStartMicroseconds
             ? pending.responseStartMicroseconds
             : responseOpportunity(after: offsetMicroseconds)
+        let alignedSelection = placingOnSharedGrid(
+            selected,
+            startMicroseconds: start
+        )
         return finalize(
             motif: pending.motif,
-            selected: selected,
+            selected: alignedSelection,
             tonalCenterPitchClass: pending.tonalCenterPitchClass,
             startMicroseconds: start,
             decisionSource: source
@@ -1324,7 +1333,7 @@ public struct ConversationEngine: Sendable {
             sharedTheme: developmentSource,
             pitchContext: pitchContext,
             previousResponse: previousResponseNotes
-        ).map(applyingGroove)
+        )
         guard let selected = arbiter.choose(from: candidates, context: developmentContext) else {
             return nil
         }
@@ -1477,7 +1486,11 @@ public struct ConversationEngine: Sendable {
             ?? candidates.first { $0.relationship == .tailVariation }
             ?? candidates.first { $0.relationship == .hold }
         guard let rawSelection else { return nil }
-        let selected = applyingGroove(to: rawSelection)
+        let start = responseOpportunity(after: offset)
+        let selected = placingOnSharedGrid(
+            rawSelection,
+            startMicroseconds: start
+        )
         spontaneousProposalUsed = true
         currentIntent = .question
         turnState = .preparing
@@ -1485,7 +1498,7 @@ public struct ConversationEngine: Sendable {
             motif: source,
             selected: selected,
             tonalCenterPitchClass: center,
-            startMicroseconds: responseOpportunity(after: offset),
+            startMicroseconds: start,
             decisionSource: .rules
         )
     }
@@ -1680,20 +1693,33 @@ public struct ConversationEngine: Sendable {
         return UInt64(min(Double(UInt64.max), (opportunity * beatMicroseconds).rounded()))
     }
 
-    private func applyingGroove(
-        to candidate: ConversationResponseCandidate
+    private func placingOnSharedGrid(
+        _ candidate: ConversationResponseCandidate,
+        startMicroseconds: UInt64
     ) -> ConversationResponseCandidate {
-        guard let grooveTiming, candidate.notes.count > 1 else { return candidate }
-        var previous = -Double.infinity
-        let notes = candidate.notes.map { note in
-            var onset = grooveTiming.alignedBeat(note.relativeOnsetBeats)
-            onset = max(onset, previous + 0.08)
-            previous = onset
+        guard let grooveTiming, !candidate.notes.isEmpty else { return candidate }
+        let sharedGrid = GrooveTiming(swing: grooveTiming.swing, strength: 1)
+        let startBeat = Double(startMicroseconds) / beatMicroseconds
+        var previousAbsoluteBeat = -Double.infinity
+        let notes = candidate.notes.sorted {
+            $0.relativeOnsetBeats < $1.relativeOnsetBeats
+        }.map { note in
+            let requestedAbsoluteBeat = startBeat + note.relativeOnsetBeats
+            var absoluteBeat = sharedGrid.alignedConversationBeat(
+                requestedAbsoluteBeat
+            )
+            if absoluteBeat <= previousAbsoluteBeat + 0.001 {
+                absoluteBeat = sharedGrid.nextConversationOpportunity(
+                    after: previousAbsoluteBeat,
+                    minimumLeadBeats: 0.001
+                )
+            }
+            previousAbsoluteBeat = absoluteBeat
             return ConversationResponseNote(
                 sourceNoteID: note.sourceNoteID,
                 note: note.note,
                 velocity: note.velocity,
-                relativeOnsetBeats: onset,
+                relativeOnsetBeats: max(0, absoluteBeat - startBeat),
                 durationBeats: note.durationBeats
             )
         }

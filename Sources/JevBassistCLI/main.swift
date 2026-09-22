@@ -335,7 +335,7 @@ private enum Command {
             style: style,
             mode: mode,
             grooveTiming: groove == .riot
-                ? GrooveTiming(swing: swing, strength: 0.72)
+                ? GrooveTiming(swing: swing, strength: 1)
                 : nil
         )
         return JamOptions(
@@ -833,7 +833,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 style: options.style,
                 mode: options.mode,
                 grooveTiming: options.groove == .riot
-                    ? GrooveTiming(swing: options.swing, strength: 0.72)
+                    ? GrooveTiming(swing: options.swing, strength: 1)
                     : nil
             ),
             decisionProvider: decisionProvider,
@@ -910,7 +910,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             guard let self else { return }
             swing = 0.5 + Double(min(value, 100)) / 100 * 0.18
             engine.setConversationGrooveTiming(
-                GrooveTiming(swing: swing, strength: 0.72)
+                GrooveTiming(swing: swing, strength: 1)
             )
             publishState(elapsedMicroseconds: currentElapsedMicroseconds())
         }

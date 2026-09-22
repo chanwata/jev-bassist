@@ -261,6 +261,16 @@ The primary human evaluation is a short rating of “this felt like another play
 - retain local deterministic fallback at the reserved onset when Jev misses the musical deadline, with decision provenance visible in the terminal and browser state;
 - add deterministic tests for the tightened phrase boundary, straight response grid, swung response grid, and browser render loop.
 
+### M16: single-phase ensemble grid
+
+- treat the Swift session clock as the only rhythmic origin for drums, keyboard punctuation, and every companion Note On;
+- convert candidate-relative onsets to absolute session beats before applying swing, then quantize exactly once;
+- never restart swing phase at a companion response boundary, including an entrance on a swung or fine subdivision;
+- use full shared-grid strength for all automatic parts and reserve expressive microtiming for a future bounded post-grid layer;
+- preserve candidate timing summaries after grid placement so Jev selects among the same rhythms that local rendering will schedule;
+- realign safely if a stalled live queue moves a pending response to a later opportunity;
+- test absolute companion onsets rather than only relative intervals or the response start.
+
 ## Out of scope for the early MVP
 
 - audio transcription;

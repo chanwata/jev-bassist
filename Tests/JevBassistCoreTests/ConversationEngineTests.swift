@@ -161,6 +161,12 @@ final class ConversationEngineTests: XCTestCase {
 
         XCTAssertEqual(plan.phrase.startMicroseconds, 2_300_000)
         XCTAssertLessThan(plan.phrase.startMicroseconds - 2_215_000, 100_000)
+        XCTAssertEqual(
+            plan.phrase.messages
+                .filter { $0.kind == .noteOn }
+                .map(\.offsetMicroseconds),
+            [2_300_000, 2_650_000, 3_150_000]
+        )
     }
 
     func testHumanAttackDoesNotErasePendingPhraseDecision() throws {

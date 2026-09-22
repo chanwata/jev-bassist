@@ -29,6 +29,7 @@ Keep the JD-Xi program, tempo, mode, volumes, audio-input choice, room, browser 
 | Browser reconnect | Retained phrase geometry returns without replaying historical attacks. |
 | Reduced motion | Phrase identity remains visible with fewer layers and smaller deformations. |
 | Reply timing | After a clearly released phrase, the response enters on the next fine shared subdivision rather than waiting for the next eighth-note slot. |
+| Shared pulse | Every later Jev attack remains on the same absolute straight or swung grid as Box and Keys, even when the response begins off the quarter-note downbeat. |
 
 ## Rating
 

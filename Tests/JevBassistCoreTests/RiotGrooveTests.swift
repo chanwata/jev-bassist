@@ -84,6 +84,14 @@ final class RiotGrooveTests: XCTestCase {
             timing.nextConversationOpportunity(after: 1.1, minimumLeadBeats: 0),
             1.3
         )
+        XCTAssertEqual(
+            GrooveTiming(swing: 0.6, strength: 1).alignedConversationBeat(1.12),
+            1
+        )
+        XCTAssertEqual(
+            GrooveTiming(swing: 0.6, strength: 1).alignedConversationBeat(1.62),
+            1.6
+        )
         XCTAssertEqual(timing.alignedBeat(0.52), 0.58, accuracy: 0.0001)
         XCTAssertEqual(timing.alignedBeat(1), 1, accuracy: 0.0001)
     }
@@ -126,7 +134,11 @@ final class RiotGrooveTests: XCTestCase {
             .map(\.offsetMicroseconds)
 
         XCTAssertEqual(plan.phrase.startMicroseconds, 2_300_000)
-        XCTAssertEqual(onsets, [2_300_000, 2_600_000, 2_800_000])
+        XCTAssertEqual(onsets, [2_300_000, 2_500_000, 2_800_000])
+        XCTAssertEqual(
+            onsets.map { Double($0) / 500_000 },
+            [4.6, 5.0, 5.6]
+        )
     }
 
     private func note(id: UInt64, pitch: UInt8, onset: Double) -> MotifNote {

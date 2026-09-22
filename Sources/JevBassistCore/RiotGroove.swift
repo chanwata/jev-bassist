@@ -52,6 +52,27 @@ public struct GrooveTiming: Codable, Equatable, Sendable {
         ]
         return candidates.first(where: { $0 >= threshold }) ?? quarter + 1
     }
+
+    /// Aligns an absolute session beat to the nearest point on the same fine
+    /// swung grid used for conversational entrances.
+    public func alignedConversationBeat(_ beat: Double) -> Double {
+        guard beat.isFinite, beat >= 0 else { return 0 }
+        let quarter = floor(beat)
+        let candidates = (-1...1).flatMap { offset -> [Double] in
+            let base = quarter + Double(offset)
+            return [
+                base,
+                base + swing * 0.5,
+                base + swing,
+                base + (1 + swing) * 0.5,
+                base + 1
+            ]
+        }.filter { $0 >= 0 }
+        let target = candidates.min {
+            abs($0 - beat) < abs($1 - beat)
+        } ?? beat
+        return beat + (target - beat) * strength
+    }
 }
 
 public struct RiotGroovePlan: Equatable, Sendable {
