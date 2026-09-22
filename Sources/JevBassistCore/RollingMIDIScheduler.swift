@@ -4,17 +4,20 @@ public struct RollingMIDIEvent: Codable, Equatable, Sendable {
     public let id: UInt64
     public let revision: UInt64
     public let noteID: UInt64?
+    public let noteOnIndex: Int?
     public let message: ScheduledMIDIMessage
 
     public init(
         id: UInt64,
         revision: UInt64,
         noteID: UInt64?,
+        noteOnIndex: Int? = nil,
         message: ScheduledMIDIMessage
     ) {
         self.id = id
         self.revision = revision
         self.noteID = noteID
+        self.noteOnIndex = noteOnIndex
         self.message = message
     }
 }
@@ -79,16 +82,21 @@ public struct RollingMIDIScheduler: Sendable {
     public mutating func submit(_ messages: [ScheduledMIDIMessage]) -> UInt64 {
         revision += 1
         var openNotes: [NoteKey: [UInt64]] = [:]
+        var nextNoteOnIndex = 0
         let ordered = messages.sorted(by: messageOrder)
         for message in ordered {
             let key = NoteKey(channel: message.channel, note: message.note)
             let noteID: UInt64?
+            let noteOnIndex: Int?
             switch message.kind {
             case .noteOn:
                 noteID = nextNoteID
+                noteOnIndex = nextNoteOnIndex
                 openNotes[key, default: []].append(nextNoteID)
                 nextNoteID += 1
+                nextNoteOnIndex += 1
             case .noteOff:
+                noteOnIndex = nil
                 if var matches = openNotes[key], !matches.isEmpty {
                     noteID = matches.removeFirst()
                     openNotes[key] = matches
@@ -101,6 +109,7 @@ public struct RollingMIDIScheduler: Sendable {
                     id: nextEventID,
                     revision: revision,
                     noteID: noteID,
+                    noteOnIndex: noteOnIndex,
                     message: message
                 )
             )
