@@ -27,7 +27,7 @@ final class RiotGrooveTests: XCTestCase {
         XCTAssertTrue(plan.drumMessages.allSatisfy { $0.channel == 10 })
         XCTAssertTrue(plan.textureMessages.allSatisfy { $0.channel == 2 })
         XCTAssertEqual(
-            plan.textureMessages.first { $0.kind == .noteOn }?.note % 12,
+            try XCTUnwrap(plan.textureMessages.first { $0.kind == .noteOn }).note % 12,
             2,
             "The first keyboard punctuation should anchor the inferred tonic."
         )
