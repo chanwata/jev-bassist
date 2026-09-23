@@ -5,7 +5,7 @@ import XCTest
 
 final class JevDecisionProviderTests: XCTestCase {
     func testRequestEncodesOfficialSystemOneShape() throws {
-        let request = JevSystemOneRequest(input: makeInput(targetBarIndex: 4))
+        let request = JevSystemOneRequest(input: makeInput(targetBarIndex: 4, userCue: .lockIn))
         let data = try JSONEncoder().encode(request)
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -18,6 +18,7 @@ final class JevDecisionProviderTests: XCTestCase {
         XCTAssertEqual(object["model"] as? String, "jev-latest")
         XCTAssertEqual(state["target_bar_index"] as? Int, 4)
         XCTAssertEqual(state["note_density_per_beat"] as? Double, 1)
+        XCTAssertEqual(state["user_cue"] as? String, "lock_in")
         XCTAssertEqual((state["next_chord"] as? [String: Any])?["root"] as? String, "G")
         XCTAssertEqual(activity["type"] as? String, "choice")
         XCTAssertNotNil(activity["criteria"] as? [String: String])
@@ -124,7 +125,10 @@ final class JevDecisionProviderTests: XCTestCase {
         XCTAssertEqual(outcome.value, .cancelled)
     }
 
-    private func makeInput(targetBarIndex: Int) -> BassDecisionInput {
+    private func makeInput(
+        targetBarIndex: Int,
+        userCue: BassUserCue? = nil
+    ) -> BassDecisionInput {
         BassDecisionInput(
             state: MusicalState(
                 noteOnCount: 4,
@@ -161,7 +165,8 @@ final class JevDecisionProviderTests: XCTestCase {
                 confidence: 1
             ),
             isHeldChord: false,
-            targetBarIndex: targetBarIndex
+            targetBarIndex: targetBarIndex,
+            userCue: userCue
         )
     }
 

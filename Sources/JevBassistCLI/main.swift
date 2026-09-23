@@ -364,7 +364,8 @@ private func format(_ plan: BassBarPlan) -> String {
         .filter { $0.kind == .noteOn }
         .map { MIDINoteName.name(for: $0.note) }
         .joined(separator: ",")
-    return "bass bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
+    let cue = plan.userCue.map { " cue=\($0.rawValue)" } ?? ""
+    return "bass bar=\(plan.targetBarIndex + 1) brain=\(plan.decisionSource.rawValue) chord=\(chord)\(held)\(cue) activity=\(plan.decision.activity.rawValue) relationship=\(plan.decision.relationship.rawValue) motion=\(plan.decision.motion.rawValue) fill=\(plan.decision.fill) notes=\(notes.isEmpty ? "rest" : notes)"
 }
 
 private let jevTraceLock = NSLock()
@@ -499,7 +500,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var lastPublishedBeat: Int?
     private var lastChord: String?
     private var lastDecisionSource: String?
+    private var lastDecision: BassDecision?
     private var lastNote: String?
+    private var lastAppliedUserCue: BassUserCue?
+    private var queuedUserCue: BassUserCue?
+    private var queuedCueTargetBar: Int?
 
     init(
         options: JamOptions,
@@ -556,6 +561,23 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     func startClockFromWeb() {
         queue.async { [weak self] in
             self?.beginClock(hostTime: MIDIHostTime.now, trigger: "Web UI")
+        }
+    }
+
+    func setUserCueFromWeb(_ cue: BassUserCue?) {
+        queue.async { [weak self] in
+            guard let self, !stopped, anchorHostTime != nil, options.brain == .jev else {
+                return
+            }
+            engine.queueUserCue(cue)
+            queuedUserCue = cue
+            if cue == nil {
+                queuedCueTargetBar = nil
+            } else {
+                let currentBar = (lastPublishedBeat ?? 0) / options.beatsPerBar + 1
+                queuedCueTargetBar = max(currentBar + 2, options.introBars + 1)
+            }
+            publishState(elapsedMicroseconds: elapsedMicrosecondsNow())
         }
     }
 
@@ -704,6 +726,12 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             print(format(plan))
             lastChord = plan.chord?.displayName
             lastDecisionSource = plan.decisionSource.rawValue
+            lastDecision = plan.decision
+            lastAppliedUserCue = plan.userCue
+            if queuedCueTargetBar == plan.targetBarIndex + 1 {
+                queuedUserCue = nil
+                queuedCueTargetBar = nil
+            }
             try output.schedule(
                 plan.phrase.messages,
                 anchorHostTime: outputAnchor
@@ -740,9 +768,19 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 chord: barIndex.flatMap { progressionChord(for: $0)?.displayName } ?? lastChord,
                 nextChord: barIndex.flatMap { progressionChord(for: $0 + 1)?.displayName },
                 decisionSource: lastDecisionSource,
-                lastNote: lastNote
+                decision: lastDecision,
+                lastNote: lastNote,
+                appliedUserCue: lastAppliedUserCue,
+                queuedUserCue: queuedUserCue,
+                queuedCueTargetBar: queuedCueTargetBar
             )
         )
+    }
+
+    private func elapsedMicrosecondsNow() -> UInt64? {
+        anchorHostTime.map {
+            MIDIHostTime.microseconds(from: $0, to: MIDIHostTime.now)
+        }
     }
 
     private func progressionChord(for barIndex: Int) -> ChordCandidate? {
