@@ -85,10 +85,27 @@ public enum MIDIHostTime {
         return UInt64(microseconds.rounded())
     }
 
+    public static func signedMicroseconds(from start: UInt64, to end: UInt64) -> Int64 {
+        if end >= start {
+            return Int64(min(microseconds(from: start, to: end), UInt64(Int64.max)))
+        }
+        return -Int64(min(microseconds(from: end, to: start), UInt64(Int64.max)))
+    }
+
     private static func currentTimebase() -> mach_timebase_info_data_t {
         var value = mach_timebase_info_data_t()
         mach_timebase_info(&value)
         return value
+    }
+}
+
+public struct MIDIOutputSchedulingReport: Equatable, Sendable {
+    /// Positive values mean CoreMIDI received the packet before its timestamp;
+    /// negative values mean the handoff was already late.
+    public let handoffLeadMicroseconds: [Int64]
+
+    public init(handoffLeadMicroseconds: [Int64]) {
+        self.handoffLeadMicroseconds = handoffLeadMicroseconds
     }
 }
 
@@ -199,20 +216,26 @@ public final class CoreMIDIOutput: @unchecked Sendable {
         return matches[0]
     }
 
+    @discardableResult
     public func schedule(
         _ messages: [ScheduledMIDIMessage],
         anchorHostTime: UInt64
-    ) throws {
+    ) throws -> MIDIOutputSchedulingReport {
         lock.lock()
         defer { lock.unlock() }
         guard let destination else {
             throw CoreMIDIOutputError.notConnected
         }
 
+        var handoffLeadMicroseconds: [Int64] = []
+        handoffLeadMicroseconds.reserveCapacity(messages.count)
         for message in messages {
             let hostTime = MIDIHostTime.addingMicroseconds(
                 message.offsetMicroseconds,
                 to: anchorHostTime
+            )
+            handoffLeadMicroseconds.append(
+                MIDIHostTime.signedMicroseconds(from: MIDIHostTime.now, to: hostTime)
             )
             try sendPacket(
                 message.bytes,
@@ -220,6 +243,9 @@ public final class CoreMIDIOutput: @unchecked Sendable {
                 destination: destination.endpoint
             )
         }
+        return MIDIOutputSchedulingReport(
+            handoffLeadMicroseconds: handoffLeadMicroseconds
+        )
     }
 
     /// Sends an immediate MIDI Control Change. Live mix controls use CC7 on
@@ -249,6 +275,13 @@ public final class CoreMIDIOutput: @unchecked Sendable {
     /// Cancels timestamped packets not yet delivered, then silences the active
     /// output channel with All Notes Off and All Sound Off.
     public func stop(channel: UInt8 = 1) throws {
+        try stop(channels: [channel])
+    }
+
+    /// Flushes pending packets once, then silences every requested channel.
+    /// Keeping this in one locked operation prevents a later channel's flush
+    /// from discarding an earlier channel's emergency control messages.
+    public func stop(channels: [UInt8]) throws {
         lock.lock()
         defer { lock.unlock() }
         guard let destination else {
@@ -256,21 +289,29 @@ public final class CoreMIDIOutput: @unchecked Sendable {
         }
 
         let flushStatus = MIDIFlushOutput(destination.endpoint)
-        let controlStatus = UInt8(0xB0 | ((channel - 1) & 0x0F))
         let now = MIDIHostTime.now
-        try sendPacket(
-            [controlStatus, 123, 0],
-            at: now,
-            destination: destination.endpoint
-        )
-        try sendPacket(
-            [controlStatus, 120, 0],
-            at: now,
-            destination: destination.endpoint
-        )
+        let validChannels = Set(channels.filter { (1...16).contains(Int($0)) }).sorted()
+        for channel in validChannels {
+            let controlStatus = UInt8(0xB0 | ((channel - 1) & 0x0F))
+            try sendPacket(
+                [controlStatus, 123, 0],
+                at: now,
+                destination: destination.endpoint
+            )
+            try sendPacket(
+                [controlStatus, 120, 0],
+                at: now,
+                destination: destination.endpoint
+            )
+        }
         guard flushStatus == noErr else {
             throw CoreMIDIOutputError.flush(flushStatus)
         }
+    }
+
+    /// Emergency stop for an unknown or stale session configuration.
+    public func panic() throws {
+        try stop(channels: (1...16).map { UInt8($0) })
     }
 
     private func sendPacket(

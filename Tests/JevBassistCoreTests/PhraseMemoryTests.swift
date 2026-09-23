@@ -89,6 +89,41 @@ final class PhraseMemoryTests: XCTestCase {
         XCTAssertEqual(memory.motifs.map(\.id), [2, 3])
     }
 
+    func testGrooveMotifStoresStraightGridOnsetsAndSourcePhase() throws {
+        let configuration = try MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4)
+        let observation = PhraseObservation(
+            notes: [
+                note(id: 1, pitch: 60, velocity: 96, onset: 145_000, release: 240_000),
+                note(id: 2, pitch: 64, velocity: 84, onset: 290_000, release: 400_000),
+                note(id: 3, pitch: 67, velocity: 88, onset: 500_000, release: 620_000)
+            ],
+            melodyNotes: [
+                note(id: 1, pitch: 60, velocity: 96, onset: 145_000, release: 240_000),
+                note(id: 2, pitch: 64, velocity: 84, onset: 290_000, release: 400_000),
+                note(id: 3, pitch: 67, velocity: 88, onset: 500_000, release: 620_000)
+            ],
+            simultaneousNoteGroups: [[1], [2], [3]],
+            startMicroseconds: 145_000,
+            endMicroseconds: 620_000,
+            finalizedAtMicroseconds: 900_000,
+            boundaryConfidence: 0.9,
+            melodyConfidence: 1
+        )
+        var memory = MotifMemory()
+
+        let motif = try XCTUnwrap(memory.remember(
+            observation,
+            musicalStateConfiguration: configuration,
+            grooveTiming: GrooveTiming(swing: 0.58, strength: 1)
+        ))
+
+        XCTAssertEqual(motif.grooveStartSubdivision, 1)
+        XCTAssertEqual(motif.notes.map(\.grooveOnsetBeats), [0, 0.25, 0.75])
+        XCTAssertEqual(motif.notes[0].relativeOnsetBeats, 0, accuracy: 0.0001)
+        XCTAssertEqual(motif.notes[1].relativeOnsetBeats, 0.29, accuracy: 0.0001)
+        XCTAssertEqual(motif.notes[2].relativeOnsetBeats, 0.71, accuracy: 0.0001)
+    }
+
     func testContinuousPlayingEmitsBoundedObservationWithoutSilence() throws {
         let configuration = try MusicalStateConfiguration(tempoBPM: 120, beatsPerBar: 4)
         var segmenter = PhraseSegmenter(

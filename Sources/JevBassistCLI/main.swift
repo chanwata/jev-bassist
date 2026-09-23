@@ -10,6 +10,10 @@ private struct SoundcheckOptions {
     let channel: UInt8
 }
 
+private struct PanicOptions {
+    let destination: String
+}
+
 private struct EvaluationOptions {
     let inputPath: String
     let outputPath: String
@@ -59,6 +63,7 @@ private enum Command {
     case replay(inputPath: String, tempoBPM: Double, beatsPerBar: Int)
     case evaluate(EvaluationOptions)
     case soundcheck(SoundcheckOptions)
+    case panic(PanicOptions)
     case jam(JamOptions)
     case help
 
@@ -85,6 +90,8 @@ private enum Command {
             self = .evaluate(try Self.evaluationOptions(in: Array(arguments.dropFirst())))
         case "soundcheck":
             self = .soundcheck(try Self.soundcheckOptions(in: Array(arguments.dropFirst())))
+        case "panic":
+            self = .panic(try Self.panicOptions(in: Array(arguments.dropFirst())))
         case "jam":
             self = .jam(try Self.jamOptions(in: Array(arguments.dropFirst())))
         case "help", "--help", "-h":
@@ -158,6 +165,18 @@ private enum Command {
             destination: destination,
             channel: try channelOption(options, name: "--channel", default: 3)
         )
+    }
+
+    private static func panicOptions(in arguments: [String]) throws -> PanicOptions {
+        let options = try optionValues(
+            in: arguments,
+            allowed: ["--destination"],
+            usage: "panic --destination NAME"
+        )
+        guard let destination = options["--destination"] else {
+            throw CLIError.invalidArguments("'panic' requires --destination NAME.")
+        }
+        return PanicOptions(destination: destination)
     }
 
     private static func evaluationOptions(in arguments: [String]) throws -> EvaluationOptions {
@@ -270,7 +289,7 @@ private enum Command {
         )
         let grooveName = options["--groove"] ?? GrooveStyle.off.rawValue
         guard let groove = GrooveStyle(rawValue: grooveName) else {
-            throw CLIError.invalidArguments("--groove must be 'off' or 'riot'.")
+            throw CLIError.invalidArguments("--groove must be 'off', 'riot', or 'house'.")
         }
         let swing = try doubleOption(options, name: "--swing", default: 0.58)
         guard swing.isFinite, (0.5...0.68).contains(swing) else {
@@ -288,11 +307,11 @@ private enum Command {
         let textureChannel = try channelOption(options, name: "--texture-channel", default: 2)
         let drumVolume = try midiValueOption(options, name: "--drum-volume", default: 62)
         let textureVolume = try midiValueOption(options, name: "--texture-volume", default: 50)
-        if groove == .riot {
+        if groove != .off {
             let channels = [inputChannel, outputChannel, drumChannel, textureChannel]
             guard Set(channels).count == channels.count else {
                 throw CLIError.invalidArguments(
-                    "Riot groove requires distinct input, companion, drum, and texture channels."
+                    "Groove mode requires distinct input, companion, drum, and texture channels."
                 )
             }
         }
@@ -334,8 +353,12 @@ private enum Command {
             progression: progression,
             style: style,
             mode: mode,
-            grooveTiming: groove == .riot
-                ? GrooveTiming(swing: swing, strength: 1)
+            grooveTiming: groove != .off
+                ? GrooveTiming(
+                    swing: swing,
+                    strength: 1,
+                    conversationGrid: groove == .house ? .eighth : .fine
+                )
                 : nil
         )
         return JamOptions(
@@ -470,7 +493,8 @@ USAGE
   jev-bassist replay FILE [--bpm BPM] [--beats-per-bar N]
   jev-bassist evaluate INPUT OUTPUT [--bpm BPM] [--beats-per-bar N] [--intro-bars N] [--output-channel N] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS]
   jev-bassist soundcheck --destination NAME [--channel N]
-  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS] [--groove off|riot] [--swing 0.50...0.68] [--groove-intensity 0...1] [--drum-channel N] [--texture-channel N] [--drum-volume 0...127] [--texture-volume 0...127] [--ui]
+  jev-bassist panic --destination NAME
+  jev-bassist jam --source NAME --destination NAME [--bpm BPM] [--beats-per-bar N] [--input-channel N] [--output-channel N] [--human-volume 0...127] [--companion-volume 0...127] [--intro-bars N] [--brain rules|jev] [--style bass|ambient|memory|fugue] [--mode MODE] [--progression CHORDS] [--groove off|riot|house] [--swing 0.50...0.68] [--groove-intensity 0...1] [--drum-channel N] [--texture-channel N] [--drum-volume 0...127] [--texture-volume 0...127] [--ui]
   jev-bassist help
 
 COMMANDS
@@ -481,6 +505,7 @@ COMMANDS
   replay       Replay into the analyzer and print state. No MIDI output is sent.
   evaluate     Run a fixture through the local ensemble and save a deterministic trace. No MIDI output is sent.
   soundcheck   Send three short bass notes to one destination, then silence it.
+  panic        Flush pending MIDI and silence all 16 channels immediately.
   jam          Listen locally and schedule bass or ambient accompaniment after the intro.
 """
 
@@ -713,8 +738,40 @@ private func runSoundcheck(_ options: SoundcheckOptions) throws {
     print("Soundcheck complete; pending output was flushed and the channel was silenced.")
 }
 
+private func runPanic(_ options: PanicOptions) throws {
+    let output = try CoreMIDIOutput()
+    let destination = try output.connect(destinationMatching: options.destination)
+    try output.panic()
+    print("Panic sent to \(destination.name); pending MIDI was flushed and all 16 channels were silenced.")
+}
+
 /// Mutable session state is confined to `queue`; the unchecked conformance is
 /// used only so CoreMIDI's Sendable callback can enqueue copied events.
+private struct MIDISchedulingStatistics {
+    private var latenessMicroseconds: [UInt64] = []
+
+    mutating func record(_ report: MIDIOutputSchedulingReport) {
+        latenessMicroseconds.append(contentsOf: report.handoffLeadMicroseconds.map {
+            $0 < 0 ? UInt64(-$0) : 0
+        })
+    }
+
+    var summary: String? {
+        guard !latenessMicroseconds.isEmpty else { return nil }
+        let sorted = latenessMicroseconds.sorted()
+        let lateCount = sorted.filter { $0 > 0 }.count
+        return "samples=\(sorted.count) late=\(lateCount) "
+            + "p50=\(percentile(0.50, in: sorted))us "
+            + "p95=\(percentile(0.95, in: sorted))us "
+            + "p99=\(percentile(0.99, in: sorted))us"
+    }
+
+    private func percentile(_ probability: Double, in sorted: [UInt64]) -> UInt64 {
+        let index = Int((Double(sorted.count - 1) * probability).rounded(.up))
+        return sorted[min(sorted.count - 1, max(0, index))]
+    }
+}
+
 private final class JamSession: @unchecked Sendable, JamWebControlling {
     private struct PendingConversationAcknowledgement {
         let onsetMicroseconds: UInt64
@@ -737,6 +794,8 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var grooveGenerator: RiotGrooveGenerator?
     private var schedulerLineage: [UInt64: ConversationLineage] = [:]
     private var pendingConversationAcknowledgements: [PendingConversationAcknowledgement] = []
+    private var companionSchedulingStatistics = MIDISchedulingStatistics()
+    private var grooveSchedulingStatistics = MIDISchedulingStatistics()
     private var anchorHostTime: UInt64?
     private var startedAt: Date?
     private var timer: DispatchSourceTimer?
@@ -755,6 +814,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     private var drumVolume: UInt8
     private var textureVolume: UInt8
     private var swing: Double
+    private var scheduledSwingChanges: [Int: Double] = [:]
     private var grooveIntensity: Double
     private var latestHumanDensity = 0.0
     private var nextGrooveBarIndex = 0
@@ -789,7 +849,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             tempoBPM: options.tempoBPM,
             beatsPerBar: options.beatsPerBar
         )
-        grooveGenerator = options.groove == .riot
+        grooveGenerator = options.groove != .off
             ? RiotGrooveGenerator(
                 musicalState: musicalState,
                 drumChannel: options.drumChannel,
@@ -832,8 +892,12 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 progression: options.progression,
                 style: options.style,
                 mode: options.mode,
-                grooveTiming: options.groove == .riot
-                    ? GrooveTiming(swing: options.swing, strength: 1)
+                grooveTiming: options.groove != .off
+                    ? GrooveTiming(
+                        swing: options.swing,
+                        strength: 1,
+                        conversationGrid: options.groove == .house ? .eighth : .fine
+                    )
                     : nil
             ),
             decisionProvider: decisionProvider,
@@ -851,7 +915,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 channel: options.outputChannel
             )
         }
-        if options.groove == .riot {
+        if options.groove != .off {
             try output.sendControlChange(
                 controller: 7,
                 value: drumVolume,
@@ -908,10 +972,18 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
     func setSwingFromWeb(_ value: UInt8) {
         queue.async { [weak self] in
             guard let self else { return }
-            swing = 0.5 + Double(min(value, 100)) / 100 * 0.18
-            engine.setConversationGrooveTiming(
-                GrooveTiming(swing: swing, strength: 1)
-            )
+            let requested = 0.5 + Double(min(value, 100)) / 100 * 0.18
+            if let elapsed = currentElapsedMicroseconds() {
+                let currentBar = Int(elapsed / barMicroseconds)
+                let effectiveBar = max(currentBar + 1, nextGrooveBarIndex)
+                scheduledSwingChanges[effectiveBar] = requested
+            } else {
+                swing = requested
+                scheduledSwingChanges.removeAll(keepingCapacity: true)
+                engine.setConversationGrooveTiming(
+                    conversationTiming(swing: swing)
+                )
+            }
             publishState(elapsedMicroseconds: currentElapsedMicroseconds())
         }
     }
@@ -941,15 +1013,20 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             engine.cancelPendingDecisions()
             _ = scheduler.cancelAllPending()
             _ = grooveScheduler.cancelAllPending()
-            let channels = options.groove == .riot
-                ? [options.outputChannel, options.drumChannel, options.textureChannel]
-                : [options.outputChannel]
-            for channel in channels {
-                do {
-                    try output.stop(channel: channel)
-                } catch {
-                    failureDescription = failureDescription ?? String(describing: error)
-                }
+            let channels = options.groove != .off
+                ? [options.inputChannel, options.outputChannel,
+                   options.drumChannel, options.textureChannel]
+                : [options.inputChannel, options.outputChannel]
+            do {
+                try output.stop(channels: channels)
+            } catch {
+                failureDescription = failureDescription ?? String(describing: error)
+            }
+            if let summary = companionSchedulingStatistics.summary {
+                print("MIDI handoff lateness (Jev): \(summary)")
+            }
+            if let summary = grooveSchedulingStatistics.summary {
+                print("MIDI handoff lateness (Box/Keys): \(summary)")
             }
             publishState(elapsedMicroseconds: nil)
             return failureDescription
@@ -1061,6 +1138,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             ? elapsed - Self.inputGraceMicroseconds
             : 0
         do {
+            activatePendingSwing(through: safeElapsed)
             acknowledgeElapsedConversationNotes(through: safeElapsed)
             scheduleGroove(through: safeElapsed)
             try process(
@@ -1144,25 +1222,58 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
 
     private func scheduleGroove(through offset: UInt64) {
         guard let grooveGenerator else { return }
-        let barMicroseconds = UInt64(
-            (Double(options.beatsPerBar) * 60_000_000 / options.tempoBPM).rounded()
-        )
         let lookAhead = offset.addingReportingOverflow(100_000)
         let through = lookAhead.overflow ? UInt64.max : lookAhead.partialValue
         while UInt64(nextGrooveBarIndex) * barMicroseconds <= through {
+            let plannedSwing = scheduledSwingChanges
+                .filter { $0.key <= nextGrooveBarIndex }
+                .max(by: { $0.key < $1.key })?.value ?? swing
             let plan = grooveGenerator.plan(
                 barIndex: nextGrooveBarIndex,
                 humanDensity: latestHumanDensity,
                 tonalCenterPitchClass: lastTonalCenterPitchClass,
                 mode: options.mode,
-                swing: swing,
-                intensity: grooveIntensity
+                swing: plannedSwing,
+                intensity: grooveIntensity,
+                style: options.groove
             )
             if !plan.messages.isEmpty {
                 _ = grooveScheduler.submit(plan.messages)
             }
             nextGrooveBarIndex += 1
         }
+    }
+
+    private var barMicroseconds: UInt64 {
+        UInt64(
+            (Double(options.beatsPerBar) * 60_000_000 / options.tempoBPM).rounded()
+        )
+    }
+
+    private var requestedSwing: Double {
+        scheduledSwingChanges.max(by: { $0.key < $1.key })?.value ?? swing
+    }
+
+    private func conversationTiming(swing: Double) -> GrooveTiming {
+        GrooveTiming(
+            swing: swing,
+            strength: 1,
+            conversationGrid: options.groove == .house ? .eighth : .fine
+        )
+    }
+
+    private func activatePendingSwing(through offset: UInt64) {
+        let currentBar = Int(offset / barMicroseconds)
+        guard let change = scheduledSwingChanges
+            .filter({ $0.key <= currentBar })
+            .max(by: { $0.key < $1.key }) else {
+            return
+        }
+        swing = change.value
+        scheduledSwingChanges = scheduledSwingChanges.filter { $0.key > currentBar }
+        engine.setConversationGrooveTiming(
+            conversationTiming(swing: swing)
+        )
     }
 
     private func sendDueGrooveEvents(
@@ -1175,7 +1286,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             Self.outputSafetyOffsetMicroseconds,
             to: anchorHostTime
         )
-        try output.schedule(due.map(\.message), anchorHostTime: outputAnchor)
+        let report = try output.schedule(
+            due.map(\.message),
+            anchorHostTime: outputAnchor
+        )
+        grooveSchedulingStatistics.record(report)
         guard options.webUI else { return }
         for event in due {
             let message = event.message
@@ -1202,10 +1317,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
             Self.outputSafetyOffsetMicroseconds,
             to: anchorHostTime
         )
-        try output.schedule(
+        let report = try output.schedule(
             due.map(\.message),
             anchorHostTime: outputAnchor
         )
+        companionSchedulingStatistics.record(report)
         for event in due where event.message.kind == .noteOn {
             guard let responseID = schedulerLineage[event.revision]?.responseID else {
                 continue
@@ -1306,7 +1422,7 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
                 drumVolume: drumVolume,
                 textureVolume: textureVolume,
                 groove: options.groove.rawValue,
-                swing: swing,
+                swing: requestedSwing,
                 grooveIntensity: grooveIntensity,
                 expressionMemory: lastExpression.memory,
                 expressionTension: lastExpression.tension,
@@ -1414,11 +1530,11 @@ private final class JamSession: @unchecked Sendable, JamWebControlling {
         engine.cancelPendingDecisions()
         _ = scheduler.cancelAllPending()
         _ = grooveScheduler.cancelAllPending()
-        try? output.stop(channel: options.outputChannel)
-        if options.groove == .riot {
-            try? output.stop(channel: options.drumChannel)
-            try? output.stop(channel: options.textureChannel)
-        }
+        let channels = options.groove != .off
+            ? [options.inputChannel, options.outputChannel,
+               options.drumChannel, options.textureChannel]
+            : [options.inputChannel, options.outputChannel]
+        try? output.stop(channels: channels)
         publishState(elapsedMicroseconds: nil)
         stopSignal()
     }
@@ -1459,9 +1575,9 @@ private func runJam(_ options: JamOptions) throws {
     let mode = options.mode.map { " · mode \($0.rawValue)" } ?? ""
     print("Style: \(options.style.rawValue)\(mode).")
     print("Brain: \(options.brain.rawValue)\(options.brain == .jev ? " (one-bar prefetch with rules fallback)" : "").")
-    if options.groove == .riot {
+    if options.groove != .off {
         print(
-            "Groove: riot · swing \(String(format: "%.2f", options.swing)) · "
+            "Groove: \(options.groove.rawValue) · swing \(String(format: "%.2f", options.swing)) · "
                 + "intensity \(String(format: "%.2f", options.grooveIntensity)) · "
                 + "keys CH\(options.textureChannel) · box CH\(options.drumChannel)."
         )
@@ -1503,8 +1619,31 @@ private func runJam(_ options: JamOptions) throws {
     print("Stopped; pending MIDI was flushed and all configured output parts were silenced.")
 }
 
+private func emergencyPanicAfterJamError(arguments: [String]) {
+    guard arguments.first == "jam",
+          let destinationIndex = arguments.firstIndex(of: "--destination"),
+          arguments.indices.contains(destinationIndex + 1) else {
+        return
+    }
+    let destinationName = arguments[destinationIndex + 1]
+    guard !destinationName.hasPrefix("-") else { return }
+    do {
+        let output = try CoreMIDIOutput()
+        _ = try output.connect(destinationMatching: destinationName)
+        try output.panic()
+        FileHandle.standardError.write(
+            Data("Emergency MIDI panic sent to all 16 channels.\n\n".utf8)
+        )
+    } catch {
+        FileHandle.standardError.write(
+            Data("Warning: emergency MIDI panic failed: \(error)\n\n".utf8)
+        )
+    }
+}
+
 do {
-    let command = try Command(arguments: Array(CommandLine.arguments.dropFirst()))
+    let arguments = Array(CommandLine.arguments.dropFirst())
+    let command = try Command(arguments: arguments)
 
     switch command {
     case .help:
@@ -1527,10 +1666,13 @@ do {
         try runEvaluation(options)
     case let .soundcheck(options):
         try runSoundcheck(options)
+    case let .panic(options):
+        try runPanic(options)
     case let .jam(options):
         try runJam(options)
     }
 } catch {
+    emergencyPanicAfterJamError(arguments: Array(CommandLine.arguments.dropFirst()))
     FileHandle.standardError.write(Data("Error: \(error)\n\n\(usage)\n".utf8))
     exit(EXIT_FAILURE)
 }

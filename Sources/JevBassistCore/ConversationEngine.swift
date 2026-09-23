@@ -421,7 +421,8 @@ public struct ResponseCandidateGenerator: Sendable {
     public func candidates(
         for motif: Motif,
         pitchContext: ModalPitchContext,
-        previousResponse: [ConversationResponseNote] = []
+        previousResponse: [ConversationResponseNote] = [],
+        minimumResponseNotes: Int = 0
     ) -> [ConversationResponseCandidate] {
         let source = subject(from: motif)
         guard source.count >= 2 else {
@@ -434,7 +435,8 @@ public struct ResponseCandidateGenerator: Sendable {
                 source.map(\.note),
                 continuityReference: continuity
             ),
-            relationship: .echo
+            relationship: .echo,
+            minimumResponseNotes: minimumResponseNotes
         )
         var tailNotes = echoNotes
         if let last = tailNotes.last {
@@ -459,6 +461,7 @@ public struct ResponseCandidateGenerator: Sendable {
             relativeOnsetBeats: 0,
             durationBeats: min(2, max(0.75, motif.durationBeats * 0.5))
         )
+        let heldNotes = pulseHeld(held, minimumCount: minimumResponseNotes)
         let clarity = motif.melodyConfidence * motif.boundaryConfidence
         return [
             restCandidate(confidence: clarity),
@@ -489,9 +492,9 @@ public struct ResponseCandidateGenerator: Sendable {
             ConversationResponseCandidate(
                 id: "hold",
                 relationship: .hold,
-                notes: [held],
+                notes: heldNotes,
                 score: score(
-                    [held],
+                    heldNotes,
                     against: [source.last ?? source[0]],
                     relationship: .hold,
                     context: pitchContext,
@@ -506,12 +509,14 @@ public struct ResponseCandidateGenerator: Sendable {
         current: Motif,
         sharedTheme: Motif? = nil,
         pitchContext: ModalPitchContext,
-        previousResponse: [ConversationResponseNote] = []
+        previousResponse: [ConversationResponseNote] = [],
+        minimumResponseNotes: Int = 0
     ) -> [ConversationResponseCandidate] {
         var result = candidates(
             for: current,
             pitchContext: pitchContext,
-            previousResponse: previousResponse
+            previousResponse: previousResponse,
+            minimumResponseNotes: minimumResponseNotes
         )
         let source = subject(from: sharedTheme ?? origin)
         let originSource = subject(from: origin)
@@ -533,7 +538,8 @@ public struct ResponseCandidateGenerator: Sendable {
                 steps: transposition,
                 continuityReference: continuity
             ),
-            relationship: .sequence
+            relationship: .sequence,
+            minimumResponseNotes: minimumResponseNotes
         )
         let inversion = shapedNotes(
             source,
@@ -541,7 +547,8 @@ public struct ResponseCandidateGenerator: Sendable {
                 source.map(\.note),
                 continuityReference: continuity
             ),
-            relationship: .inversion
+            relationship: .inversion,
+            minimumResponseNotes: minimumResponseNotes
         )
         let fragmentSource = structuralFragment(from: source)
         let fragment = shapedNotes(
@@ -550,14 +557,16 @@ public struct ResponseCandidateGenerator: Sendable {
                 fragmentSource.map(\.note),
                 continuityReference: continuity
             ),
-            relationship: .fragmentation
+            relationship: .fragmentation,
+            minimumResponseNotes: minimumResponseNotes
         )
         let augmentation = shapedNotes(
             source,
             pitches: pitchContext.placePhrase(source.map(\.note), continuityReference: continuity),
             relationship: .augmentation,
             onsetScale: 1.5,
-            durationScale: 1.35
+            durationScale: 1.35,
+            minimumResponseNotes: minimumResponseNotes
         )
         let original = shapedNotes(
             originSource,
@@ -565,7 +574,8 @@ public struct ResponseCandidateGenerator: Sendable {
                 originSource.map(\.note),
                 continuityReference: continuity
             ),
-            relationship: .originalReturn
+            relationship: .originalReturn,
+            minimumResponseNotes: minimumResponseNotes
         )
 
         result += [
@@ -651,11 +661,13 @@ public struct ResponseCandidateGenerator: Sendable {
         pitches: [UInt8],
         relationship: ConversationRelationship,
         onsetScale: Double = 1,
-        durationScale: Double = 1
+        durationScale: Double = 1,
+        minimumResponseNotes: Int = 0
     ) -> [ConversationResponseNote] {
         guard source.count == pitches.count, let firstOnset = source.first?.relativeOnsetBeats else {
             return []
         }
+        let firstGrooveOnset = source.first?.grooveOnsetBeats
         let articulation: Double = switch relationship {
         case .fragmentation: 0.58
         case .inversion: 0.7
@@ -666,8 +678,14 @@ public struct ResponseCandidateGenerator: Sendable {
         case .originalReturn: 0.9
         case .hold, .rest: 1
         }
-        return source.indices.map { index in
-            let relativeOnset = (source[index].relativeOnsetBeats - firstOnset) * onsetScale
+        let shaped = source.indices.map { index in
+            let relativeOnset: Double
+            if let firstGrooveOnset,
+               let grooveOnset = source[index].grooveOnsetBeats {
+                relativeOnset = (grooveOnset - firstGrooveOnset) * onsetScale
+            } else {
+                relativeOnset = (source[index].relativeOnsetBeats - firstOnset) * onsetScale
+            }
             let gap = index + 1 < source.count
                 ? max(0.08, (source[index + 1].relativeOnsetBeats
                     - source[index].relativeOnsetBeats) * onsetScale)
@@ -688,6 +706,54 @@ public struct ResponseCandidateGenerator: Sendable {
                 velocity: UInt8(max(32, min(88, velocity.rounded()))),
                 relativeOnsetBeats: relativeOnset,
                 durationBeats: duration
+            )
+        }
+        return pulseExpanded(shaped, minimumCount: minimumResponseNotes)
+    }
+
+    private func pulseExpanded(
+        _ notes: [ConversationResponseNote],
+        minimumCount: Int
+    ) -> [ConversationResponseNote] {
+        let target = min(8, max(0, minimumCount))
+        guard notes.count >= 2, notes.count < target else { return notes }
+        let ordered = notes.sorted { $0.relativeOnsetBeats < $1.relativeOnsetBeats }
+        let lastEnd = ordered.map { $0.relativeOnsetBeats + $0.durationBeats }.max() ?? 1
+        let cycleBeats = max(1, (lastEnd * 2).rounded(.up) / 2)
+        var result = ordered
+        var repetition = 1
+        while result.count < target, repetition <= 4 {
+            for note in ordered where result.count < target {
+                let onset = note.relativeOnsetBeats + cycleBeats * Double(repetition)
+                guard onset < 6 else { break }
+                result.append(
+                    ConversationResponseNote(
+                        sourceNoteID: note.sourceNoteID,
+                        note: note.note,
+                        velocity: UInt8(max(30, Int(note.velocity) - repetition * 4)),
+                        relativeOnsetBeats: onset,
+                        durationBeats: min(0.42, note.durationBeats)
+                    )
+                )
+            }
+            repetition += 1
+        }
+        return result
+    }
+
+    private func pulseHeld(
+        _ note: ConversationResponseNote,
+        minimumCount: Int
+    ) -> [ConversationResponseNote] {
+        let target = min(8, max(1, minimumCount))
+        guard target > 1 else { return [note] }
+        return (0..<target).map { index in
+            ConversationResponseNote(
+                sourceNoteID: note.sourceNoteID,
+                note: note.note,
+                velocity: UInt8(max(30, Int(note.velocity) - (index % 4) * 3)),
+                relativeOnsetBeats: Double(index) * 0.5,
+                durationBeats: min(0.3, note.durationBeats)
             )
         }
     }
@@ -746,7 +812,9 @@ public struct ResponseCandidateGenerator: Sendable {
             }
             intervalSimilarity = total / Double(comparisonCount)
         }
-        let sourceRhythm = intervals(source.map { Int(($0.relativeOnsetBeats * 96).rounded()) })
+        let sourceRhythm = intervals(source.map {
+            Int((($0.grooveOnsetBeats ?? $0.relativeOnsetBeats) * 96).rounded())
+        })
         let generatedRhythm = intervals(notes.map { Int(($0.relativeOnsetBeats * 96).rounded()) })
         let rhythmCount = min(sourceRhythm.count, generatedRhythm.count)
         let rhythm: Double
@@ -1102,10 +1170,16 @@ public struct ConversationEngine: Sendable {
             availableAtMicroseconds ?? motif.finalizedAtMicroseconds
         )
         guard let prepared = prepareConversation(for: motif) else { return nil }
-        let start = nextBeat(after: availableAt, beat: beatMicroseconds)
+        let start = grooveTiming == nil
+            ? nextBeat(after: availableAt, beat: beatMicroseconds)
+            : responseOpportunity(
+                after: availableAt,
+                matchingSubdivisionPhase: motif.grooveStartSubdivision
+            )
         let selected = placingOnSharedGrid(
             prepared.localSelection,
-            startMicroseconds: start
+            startMicroseconds: start,
+            usesCanonicalGrooveOnsets: motif.grooveStartSubdivision != nil
         )
         let plan = finalize(
             motif: motif,
@@ -1132,9 +1206,17 @@ public struct ConversationEngine: Sendable {
             self.pendingConversation = nil
         }
         guard let prepared = prepareConversation(for: motif) else { return nil }
-        let responseStart = responseOpportunity(after: availableAtMicroseconds)
-        let candidates = prepared.candidates.map {
-            placingOnSharedGrid($0, startMicroseconds: responseStart)
+        let responseStart = responseOpportunity(
+            after: availableAtMicroseconds,
+            matchingSubdivisionPhase: motif.grooveStartSubdivision
+        )
+        let candidates = prepared.candidates
+        let alignedCandidates = candidates.map {
+            placingOnSharedGrid(
+                $0,
+                startMicroseconds: responseStart,
+                usesCanonicalGrooveOnsets: motif.grooveStartSubdivision != nil
+            )
         }
         let revision = nextRevision
         nextRevision += 1
@@ -1144,7 +1226,7 @@ public struct ConversationEngine: Sendable {
             originMotifID: prepared.originMotifID,
             sourceMotifID: motif.id,
             context: prepared.developmentContext,
-            candidates: candidates.map(ConversationCandidateSummary.init),
+            candidates: alignedCandidates.map(ConversationCandidateSummary.init),
             localCandidateID: prepared.localSelection.id,
             tonalCenterPitchClass: prepared.tonalCenterPitchClass,
             tonalCenterConfidence: tonalCenterConfidence,
@@ -1156,7 +1238,7 @@ public struct ConversationEngine: Sendable {
         )
         decisionProvider.prepare(input)
         if let resolution = decisionProvider.resolution(for: input),
-           let selected = candidates.first(where: {
+           let selected = alignedCandidates.first(where: {
                $0.id == resolution.candidateID
            }) {
             return finalize(
@@ -1207,10 +1289,14 @@ public struct ConversationEngine: Sendable {
         }
         let start = offsetMicroseconds <= pending.responseStartMicroseconds
             ? pending.responseStartMicroseconds
-            : responseOpportunity(after: offsetMicroseconds)
+            : responseOpportunity(
+                after: offsetMicroseconds,
+                matchingSubdivisionPhase: pending.motif.grooveStartSubdivision
+            )
         let alignedSelection = placingOnSharedGrid(
             selected,
-            startMicroseconds: start
+            startMicroseconds: start,
+            usesCanonicalGrooveOnsets: pending.motif.grooveStartSubdivision != nil
         )
         return finalize(
             motif: pending.motif,
@@ -1332,7 +1418,8 @@ public struct ConversationEngine: Sendable {
             current: motif,
             sharedTheme: developmentSource,
             pitchContext: pitchContext,
-            previousResponse: previousResponseNotes
+            previousResponse: previousResponseNotes,
+            minimumResponseNotes: grooveTiming?.usesPulseEntrances == true ? 6 : 0
         )
         guard let selected = arbiter.choose(from: candidates, context: developmentContext) else {
             return nil
@@ -1480,16 +1567,21 @@ public struct ConversationEngine: Sendable {
             current: source,
             sharedTheme: source,
             pitchContext: context,
-            previousResponse: previousResponseNotes
+            previousResponse: previousResponseNotes,
+            minimumResponseNotes: grooveTiming?.usesPulseEntrances == true ? 6 : 0
         )
         let rawSelection = candidates.first { $0.relationship == .fragmentation }
             ?? candidates.first { $0.relationship == .tailVariation }
             ?? candidates.first { $0.relationship == .hold }
         guard let rawSelection else { return nil }
-        let start = responseOpportunity(after: offset)
+        let start = responseOpportunity(
+            after: offset,
+            matchingSubdivisionPhase: source.grooveStartSubdivision
+        )
         let selected = placingOnSharedGrid(
             rawSelection,
-            startMicroseconds: start
+            startMicroseconds: start,
+            usesCanonicalGrooveOnsets: source.grooveStartSubdivision != nil
         )
         spontaneousProposalUsed = true
         currentIntent = .question
@@ -1677,7 +1769,10 @@ public struct ConversationEngine: Sendable {
         return UInt64((beatIndex * beat).rounded())
     }
 
-    private func responseOpportunity(after offset: UInt64) -> UInt64 {
+    private func responseOpportunity(
+        after offset: UInt64,
+        matchingSubdivisionPhase phase: Int? = nil
+    ) -> UInt64 {
         let minimum = offset.addingReportingOverflow(60_000)
         let safeMinimum = minimum.overflow ? UInt64.max : minimum.partialValue
         guard let grooveTiming else {
@@ -1686,28 +1781,49 @@ public struct ConversationEngine: Sendable {
             return UInt64(min(Double(UInt64.max), (index * subdivision).rounded()))
         }
         let beat = Double(safeMinimum) / beatMicroseconds
+        if grooveTiming.usesPulseEntrances {
+            let opportunity = grooveTiming.nextOpportunity(
+                after: beat,
+                minimumLeadBeats: 0
+            )
+            return UInt64(
+                min(Double(UInt64.max), (opportunity * beatMicroseconds).rounded())
+            )
+        }
         let opportunity = grooveTiming.nextConversationOpportunity(
             after: beat,
-            minimumLeadBeats: 0
+            minimumLeadBeats: 0,
+            matchingSubdivisionPhase: phase
         )
         return UInt64(min(Double(UInt64.max), (opportunity * beatMicroseconds).rounded()))
     }
 
     private func placingOnSharedGrid(
         _ candidate: ConversationResponseCandidate,
-        startMicroseconds: UInt64
+        startMicroseconds: UInt64,
+        usesCanonicalGrooveOnsets: Bool = false
     ) -> ConversationResponseCandidate {
         guard let grooveTiming, !candidate.notes.isEmpty else { return candidate }
         let sharedGrid = GrooveTiming(swing: grooveTiming.swing, strength: 1)
         let startBeat = Double(startMicroseconds) / beatMicroseconds
+        let startSubdivision = sharedGrid.conversationSubdivisionIndex(nearest: startBeat)
         var previousAbsoluteBeat = -Double.infinity
         let notes = candidate.notes.sorted {
             $0.relativeOnsetBeats < $1.relativeOnsetBeats
         }.map { note in
-            let requestedAbsoluteBeat = startBeat + note.relativeOnsetBeats
-            var absoluteBeat = sharedGrid.alignedConversationBeat(
-                requestedAbsoluteBeat
-            )
+            var absoluteBeat: Double
+            if usesCanonicalGrooveOnsets {
+                let relativeSubdivisions = Int(
+                    (note.relativeOnsetBeats
+                        * Double(GrooveTiming.conversationSubdivisionsPerBeat)).rounded()
+                )
+                absoluteBeat = sharedGrid.conversationBeat(
+                    forSubdivisionIndex: startSubdivision + relativeSubdivisions
+                )
+            } else {
+                let requestedAbsoluteBeat = startBeat + note.relativeOnsetBeats
+                absoluteBeat = sharedGrid.alignedConversationBeat(requestedAbsoluteBeat)
+            }
             if absoluteBeat <= previousAbsoluteBeat + 0.001 {
                 absoluteBeat = sharedGrid.nextConversationOpportunity(
                     after: previousAbsoluteBeat,

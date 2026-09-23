@@ -271,6 +271,27 @@ The primary human evaluation is a short rating of “this felt like another play
 - realign safely if a stalled live queue moves a pending response to a later opportunity;
 - test absolute companion onsets rather than only relative intervals or the response start.
 
+### M17: phase-preserving ensemble timing
+
+- remember groove-enabled human attacks as straight logical sixteenth-note slots plus the first attack's subdivision phase;
+- move a response to the next safe occurrence of that source phase, then convert its logical slots to swung session beats exactly once;
+- keep raw performed timing for recognition while preventing already-swung elapsed intervals from being swung again after a response is moved;
+- keep unplaced candidates for a delayed rebase, but send Jev summaries aligned to the reserved onset that local rendering will use;
+- reserve live Swing changes for the next unscheduled bar and activate the same value for the rhythm box and conversation engine at that boundary;
+- report separate Jev and Box/Keys CoreMIDI handoff-lateness p50, p95, and p99 values without presenting them as measured synthesizer audio onset.
+
+### M18: pulse-driven house ensemble
+
+- add an opt-in `house` groove without changing the existing `off` or subtractive `riot` behaviors;
+- keep four-on-the-floor kick, beats 2/4 clap, three hat positions per beat, and one short offbeat modal synth attack sounding through dense human input;
+- apply human density as a modest velocity reduction in house mode rather than deleting its pulse;
+- constrain house-mode Jev entrances to the same quarter/swung-eighth opportunities used by the rhythm section;
+- expand short echo, variation, development, and return candidates to at least six attacks while preserving their source pitches and rhythmic cycle;
+- turn the house-mode supporting hold into a six-attack half-beat pulse instead of one long isolated note;
+- keep generation, quantization, scheduling, and live Swing activation on the authoritative Swift session clock;
+- provide an explicit all-channel MIDI panic and invoke it automatically when a destination-bearing `jam` command fails argument validation;
+- document that the session tempo remains fixed and that the browser Start action supplies the shared count-in.
+
 ## Out of scope for the early MVP
 
 - audio transcription;

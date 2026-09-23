@@ -3,15 +3,34 @@ import Foundation
 public enum GrooveStyle: String, Codable, CaseIterable, Equatable, Sendable {
     case off
     case riot
+    case house
+}
+
+public enum GrooveConversationGrid: String, Codable, Equatable, Sendable {
+    case fine
+    case eighth
 }
 
 public struct GrooveTiming: Codable, Equatable, Sendable {
+    public static let conversationSubdivisionsPerBeat = 4
+
     public let swing: Double
     public let strength: Double
+    /// Nil decodes legacy fixtures as the original fine-grid behavior.
+    public let conversationGrid: GrooveConversationGrid?
 
-    public init(swing: Double = 0.58, strength: Double = 0.72) {
+    public init(
+        swing: Double = 0.58,
+        strength: Double = 0.72,
+        conversationGrid: GrooveConversationGrid = .fine
+    ) {
         self.swing = min(0.68, max(0.5, swing.isFinite ? swing : 0.58))
         self.strength = min(1, max(0, strength.isFinite ? strength : 0.72))
+        self.conversationGrid = conversationGrid
+    }
+
+    public var usesPulseEntrances: Bool {
+        conversationGrid == .eighth
     }
 
     public func alignedBeat(_ beat: Double) -> Double {
@@ -39,39 +58,72 @@ public struct GrooveTiming: Codable, Equatable, Sendable {
     /// those attacks instead of waiting an entire long or short subdivision.
     public func nextConversationOpportunity(
         after beat: Double,
-        minimumLeadBeats: Double
+        minimumLeadBeats: Double,
+        matchingSubdivisionPhase phase: Int? = nil
     ) -> Double {
         let threshold = beat + max(0, minimumLeadBeats)
-        let quarter = floor(threshold)
-        let candidates = [
-            quarter,
-            quarter + swing * 0.5,
-            quarter + swing,
-            quarter + (1 + swing) * 0.5,
-            quarter + 1
-        ]
-        return candidates.first(where: { $0 >= threshold }) ?? quarter + 1
+        let firstIndex = max(0, Int(floor(threshold)) * Self.conversationSubdivisionsPerBeat - 1)
+        let normalizedPhase = phase.map {
+            Self.positiveModulo($0, Self.conversationSubdivisionsPerBeat)
+        }
+        for index in firstIndex...(firstIndex + Self.conversationSubdivisionsPerBeat * 2) {
+            if let normalizedPhase,
+               Self.positiveModulo(index, Self.conversationSubdivisionsPerBeat) != normalizedPhase {
+                continue
+            }
+            let candidate = conversationBeat(forSubdivisionIndex: index)
+            if candidate >= threshold {
+                return candidate
+            }
+        }
+        return conversationBeat(
+            forSubdivisionIndex: firstIndex + Self.conversationSubdivisionsPerBeat * 2
+        )
     }
 
     /// Aligns an absolute session beat to the nearest point on the same fine
     /// swung grid used for conversational entrances.
     public func alignedConversationBeat(_ beat: Double) -> Double {
         guard beat.isFinite, beat >= 0 else { return 0 }
-        let quarter = floor(beat)
-        let candidates = (-1...1).flatMap { offset -> [Double] in
-            let base = quarter + Double(offset)
-            return [
-                base,
-                base + swing * 0.5,
-                base + swing,
-                base + (1 + swing) * 0.5,
-                base + 1
-            ]
-        }.filter { $0 >= 0 }
-        let target = candidates.min {
-            abs($0 - beat) < abs($1 - beat)
-        } ?? beat
+        let target = conversationBeat(
+            forSubdivisionIndex: conversationSubdivisionIndex(nearest: beat)
+        )
         return beat + (target - beat) * strength
+    }
+
+    /// Returns the nearest logical sixteenth-note slot. The integer slot is
+    /// independent of swing, so a remembered rhythm can be moved without
+    /// applying its already-observed long/short timing a second time.
+    public func conversationSubdivisionIndex(nearest beat: Double) -> Int {
+        guard beat.isFinite, beat >= 0 else { return 0 }
+        let center = Int(floor(beat)) * Self.conversationSubdivisionsPerBeat
+        let candidates = max(0, center - Self.conversationSubdivisionsPerBeat)...(
+            center + Self.conversationSubdivisionsPerBeat * 2
+        )
+        return candidates.min {
+            abs(conversationBeat(forSubdivisionIndex: $0) - beat)
+                < abs(conversationBeat(forSubdivisionIndex: $1) - beat)
+        } ?? center
+    }
+
+    /// Converts one logical sixteenth-note slot to the session beat after
+    /// applying this groove's swing exactly once.
+    public func conversationBeat(forSubdivisionIndex index: Int) -> Double {
+        let bounded = max(0, index)
+        let quarter = bounded / Self.conversationSubdivisionsPerBeat
+        let phase = bounded % Self.conversationSubdivisionsPerBeat
+        let position: Double = switch phase {
+        case 0: 0
+        case 1: swing * 0.5
+        case 2: swing
+        default: (1 + swing) * 0.5
+        }
+        return Double(quarter) + position
+    }
+
+    private static func positiveModulo(_ value: Int, _ modulus: Int) -> Int {
+        let remainder = value % modulus
+        return remainder >= 0 ? remainder : remainder + modulus
     }
 }
 
@@ -132,7 +184,8 @@ public struct RiotGrooveGenerator: Sendable {
         tonalCenterPitchClass: UInt8?,
         mode: MusicalMode?,
         swing: Double = 0.58,
-        intensity: Double = 0.65
+        intensity: Double = 0.65,
+        style: GrooveStyle = .riot
     ) -> RiotGroovePlan {
         let timing = GrooveTiming(swing: swing, strength: 1)
         let level = min(1, max(0, intensity.isFinite ? intensity : 0.65))
@@ -142,6 +195,23 @@ public struct RiotGrooveGenerator: Sendable {
                 barIndex: barIndex,
                 drumMessages: [],
                 textureMessages: []
+            )
+        }
+        guard style != .off else {
+            return RiotGroovePlan(
+                barIndex: barIndex,
+                drumMessages: [],
+                textureMessages: []
+            )
+        }
+        if style == .house {
+            return housePlan(
+                barIndex: barIndex,
+                tonalCenterPitchClass: tonalCenterPitchClass,
+                mode: mode,
+                timing: timing,
+                intensity: level,
+                humanDensity: density
             )
         }
         let barStartBeat = Double(max(0, barIndex) * musicalState.beatsPerBar)
@@ -196,6 +266,120 @@ public struct RiotGrooveGenerator: Sendable {
             drumMessages: drums.sorted(by: messageOrder),
             textureMessages: texture.sorted(by: messageOrder)
         )
+    }
+
+    private func housePlan(
+        barIndex: Int,
+        tonalCenterPitchClass: UInt8?,
+        mode: MusicalMode?,
+        timing: GrooveTiming,
+        intensity: Double,
+        humanDensity: Double
+    ) -> RiotGroovePlan {
+        let barStartBeat = Double(max(0, barIndex) * musicalState.beatsPerBar)
+        var drums: [ScheduledMIDIMessage] = []
+        for beat in 0..<musicalState.beatsPerBar {
+            let quarter = barStartBeat + Double(beat)
+            appendHit(
+                note: 36,
+                velocity: houseVelocity(beat.isMultiple(of: 2) ? 94 : 82,
+                                        intensity: intensity,
+                                        humanDensity: humanDensity),
+                beat: quarter,
+                to: &drums
+            )
+            appendHit(
+                note: 42,
+                velocity: houseVelocity(36,
+                                        intensity: intensity,
+                                        humanDensity: humanDensity),
+                beat: quarter + timing.swing * 0.5,
+                to: &drums
+            )
+            appendHit(
+                note: beat.isMultiple(of: 2) ? 46 : 42,
+                velocity: houseVelocity(52,
+                                        intensity: intensity,
+                                        humanDensity: humanDensity),
+                beat: quarter + timing.swing,
+                to: &drums
+            )
+            if intensity >= 0.48 {
+                appendHit(
+                    note: 42,
+                    velocity: houseVelocity(31,
+                                            intensity: intensity,
+                                            humanDensity: humanDensity),
+                    beat: quarter + (1 + timing.swing) * 0.5,
+                    to: &drums
+                )
+            }
+        }
+        for beat in stride(from: 1, to: musicalState.beatsPerBar, by: 2) {
+            appendHit(
+                note: 39,
+                velocity: houseVelocity(76,
+                                        intensity: intensity,
+                                        humanDensity: humanDensity),
+                beat: barStartBeat + Double(beat),
+                to: &drums
+            )
+        }
+        let texture = houseTextureMessages(
+            barStartBeat: barStartBeat,
+            barIndex: barIndex,
+            tonalCenterPitchClass: tonalCenterPitchClass,
+            mode: mode,
+            timing: timing,
+            intensity: intensity,
+            humanDensity: humanDensity
+        )
+        return RiotGroovePlan(
+            barIndex: barIndex,
+            drumMessages: drums.sorted(by: messageOrder),
+            textureMessages: texture.sorted(by: messageOrder)
+        )
+    }
+
+    private func houseTextureMessages(
+        barStartBeat: Double,
+        barIndex: Int,
+        tonalCenterPitchClass: UInt8?,
+        mode: MusicalMode?,
+        timing: GrooveTiming,
+        intensity: Double,
+        humanDensity: Double
+    ) -> [ScheduledMIDIMessage] {
+        guard let tonalCenterPitchClass, let mode, intensity >= 0.18 else { return [] }
+        let degrees = mode.intervals
+        let pattern = [0, 4, 2, 5]
+        var result: [ScheduledMIDIMessage] = []
+        for beat in 0..<musicalState.beatsPerBar {
+            let degreeIndex = pattern[(barIndex + beat) % pattern.count]
+            let pitchClass = (Int(tonalCenterPitchClass) + degrees[degreeIndex]) % 12
+            let pitch = UInt8(nearestPitch(to: pitchClass, in: 55...72))
+            appendNote(
+                note: pitch,
+                velocity: houseVelocity(58,
+                                        intensity: intensity,
+                                        humanDensity: humanDensity),
+                beat: barStartBeat + Double(beat) + timing.swing,
+                durationBeats: 0.16,
+                channel: textureChannel,
+                to: &result
+            )
+        }
+        return result
+    }
+
+    private func houseVelocity(
+        _ base: Int,
+        intensity: Double,
+        humanDensity: Double
+    ) -> UInt8 {
+        let room = 1 - min(0.16, humanDensity * 0.035)
+        let value = Double(base) * (0.58 + intensity * 0.6) * room
+        return UInt8(max(18, min(112, value.rounded())))
     }
 
     private func textureMessages(

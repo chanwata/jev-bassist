@@ -697,7 +697,7 @@
       setSlider(ui.companionVolume, ui.companionVolumeValue, next.companionVolume);
       setSlider(ui.drumVolume, ui.drumVolumeValue, next.drumVolume);
       setSlider(ui.textureVolume, ui.textureVolumeValue, next.textureVolume);
-      const grooveEnabled = next.groove === 'riot';
+      const grooveEnabled = next.groove !== 'off';
       const swingValue = Math.round((next.swing - .5) / .18 * 100);
       setSlider(ui.swing, ui.swingValue, Math.max(0, Math.min(100, swingValue)));
       setSlider(ui.grooveIntensity, ui.grooveIntensityValue, Math.round(next.grooveIntensity * 100));

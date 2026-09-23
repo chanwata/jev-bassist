@@ -1750,6 +1750,7 @@ public struct LocalBassistEngine: Sendable {
     private var motifMemory = MotifMemory()
     private var pendingMotifs: [Motif] = []
     private var conversationEngine: ConversationEngine?
+    private var conversationGrooveTiming: GrooveTiming?
     private var recentPhraseMemory: HumanPhraseMemory?
     private var fugueSubjectMemory: HumanPhraseMemory?
     private var pendingFugueSubject: HumanPhraseMemory?
@@ -1778,6 +1779,7 @@ public struct LocalBassistEngine: Sendable {
         phraseSegmenter = PhraseSegmenter(
             musicalStateConfiguration: configuration.musicalState
         )
+        conversationGrooveTiming = configuration.grooveTiming
         conversationEngine = configuration.style == .fugue
             ? configuration.mode.map {
                 ConversationEngine(
@@ -1874,6 +1876,7 @@ public struct LocalBassistEngine: Sendable {
     }
 
     public mutating func setConversationGrooveTiming(_ timing: GrooveTiming?) {
+        conversationGrooveTiming = timing
         conversationEngine?.setGrooveTiming(timing)
     }
 
@@ -2074,7 +2077,8 @@ public struct LocalBassistEngine: Sendable {
         observations.compactMap { observation in
             guard let motif = motifMemory.remember(
                 observation,
-                musicalStateConfiguration: configuration.musicalState
+                musicalStateConfiguration: configuration.musicalState,
+                grooveTiming: conversationGrooveTiming
             ) else {
                 return nil
             }

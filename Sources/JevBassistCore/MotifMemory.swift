@@ -5,6 +5,9 @@ public struct MotifNote: Codable, Equatable, Sendable {
     public let note: UInt8
     public let velocity: UInt8
     public let relativeOnsetBeats: Double
+    /// Straight-grid onset relative to the first remembered note. This is nil
+    /// for legacy and non-groove material. Swing is applied only when rendered.
+    public let grooveOnsetBeats: Double?
     public let durationBeats: Double
     public let restBeforeBeats: Double
     public let accent: Double
@@ -15,6 +18,7 @@ public struct MotifNote: Codable, Equatable, Sendable {
         note: UInt8,
         velocity: UInt8,
         relativeOnsetBeats: Double,
+        grooveOnsetBeats: Double? = nil,
         durationBeats: Double,
         restBeforeBeats: Double,
         accent: Double,
@@ -24,6 +28,7 @@ public struct MotifNote: Codable, Equatable, Sendable {
         self.note = note
         self.velocity = velocity
         self.relativeOnsetBeats = relativeOnsetBeats
+        self.grooveOnsetBeats = grooveOnsetBeats
         self.durationBeats = durationBeats
         self.restBeforeBeats = restBeforeBeats
         self.accent = min(1, max(0, accent))
@@ -58,6 +63,8 @@ public struct Motif: Codable, Equatable, Sendable {
     public let melodyConfidence: Double
     public let features: MotifFeatures
     public let finalizedAtMicroseconds: UInt64
+    /// Sixteenth-note phase (0...3) of the source phrase's first attack.
+    public let grooveStartSubdivision: Int?
 
     public init(
         id: UInt64,
@@ -66,7 +73,8 @@ public struct Motif: Codable, Equatable, Sendable {
         boundaryConfidence: Double,
         melodyConfidence: Double,
         features: MotifFeatures,
-        finalizedAtMicroseconds: UInt64
+        finalizedAtMicroseconds: UInt64,
+        grooveStartSubdivision: Int? = nil
     ) {
         self.id = id
         self.notes = notes
@@ -75,6 +83,11 @@ public struct Motif: Codable, Equatable, Sendable {
         self.melodyConfidence = melodyConfidence
         self.features = features
         self.finalizedAtMicroseconds = finalizedAtMicroseconds
+        self.grooveStartSubdivision = grooveStartSubdivision.map {
+            (($0 % GrooveTiming.conversationSubdivisionsPerBeat)
+                + GrooveTiming.conversationSubdivisionsPerBeat)
+                % GrooveTiming.conversationSubdivisionsPerBeat
+        }
     }
 
     public func legacyMemory(ageBars: Int = 0) -> HumanPhraseMemory {
@@ -122,7 +135,8 @@ public struct MotifMemory: Sendable {
 
     public mutating func remember(
         _ observation: PhraseObservation,
-        musicalStateConfiguration: MusicalStateConfiguration
+        musicalStateConfiguration: MusicalStateConfiguration,
+        grooveTiming: GrooveTiming? = nil
     ) -> Motif? {
         guard observation.melodyNotes.count >= minimumMelodyNotes,
               observation.melodyConfidence >= minimumMelodyConfidence,
@@ -130,6 +144,10 @@ public struct MotifMemory: Sendable {
             return nil
         }
         let beatMicroseconds = 60_000_000 / musicalStateConfiguration.tempoBPM
+        let firstAbsoluteBeat = Double(first.onsetMicroseconds) / beatMicroseconds
+        let firstGrooveSubdivision = grooveTiming?.conversationSubdivisionIndex(
+            nearest: firstAbsoluteBeat
+        )
         let maximumVelocity = observation.melodyNotes.map(\.velocity).max() ?? 1
         var previousRelease = first.onsetMicroseconds
         let motifNotes = observation.melodyNotes.map { note in
@@ -143,6 +161,14 @@ public struct MotifMemory: Sendable {
                 velocity: note.velocity,
                 relativeOnsetBeats: Double(note.onsetMicroseconds - first.onsetMicroseconds)
                     / beatMicroseconds,
+                grooveOnsetBeats: firstGrooveSubdivision.flatMap { firstSubdivision in
+                    grooveTiming.map { timing in
+                        let absoluteBeat = Double(note.onsetMicroseconds) / beatMicroseconds
+                        let subdivision = timing.conversationSubdivisionIndex(nearest: absoluteBeat)
+                        return Double(subdivision - firstSubdivision)
+                            / Double(GrooveTiming.conversationSubdivisionsPerBeat)
+                    }
+                },
                 durationBeats: Double(note.durationMicroseconds) / beatMicroseconds,
                 restBeforeBeats: rest,
                 accent: Double(note.velocity) / Double(maximumVelocity),
@@ -174,7 +200,8 @@ public struct MotifMemory: Sendable {
             boundaryConfidence: observation.boundaryConfidence,
             melodyConfidence: observation.melodyConfidence,
             features: features,
-            finalizedAtMicroseconds: observation.finalizedAtMicroseconds
+            finalizedAtMicroseconds: observation.finalizedAtMicroseconds,
+            grooveStartSubdivision: firstGrooveSubdivision
         )
         nextID += 1
         storedMotifs.append(motif)

@@ -231,7 +231,48 @@ swift run jev-bassist jam \
   --ui
 ```
 
-The four channels must be different when the groove is enabled. **Swing** accepts `0.50...0.68`; `0.50` is straight and the default `0.58` is a relaxed long-short subdivision. **Groove intensity** accepts `0...1`; zero is silent. The browser exposes live **Box**, **Keys**, **Swing**, and **Groove** controls beside the existing human and Jev mix. The rhythm box begins with the shared clock, including the intro, so it also supplies the requested count and pulse before Jev enters.
+The four channels must be different when the groove is enabled. **Swing** accepts `0.50...0.68`; `0.50` is straight and the default `0.58` is a relaxed long-short subdivision. **Groove intensity** accepts `0...1`; zero is silent. The browser exposes live **Box**, **Keys**, **Swing**, and **Groove** controls beside the existing human and Jev mix. A live Swing change is reserved for the next unscheduled bar, then applied to the rhythm box and Jev together. The rhythm box begins with the shared clock, including the intro, so it also supplies the requested count and pulse before Jev enters.
+
+With the rhythm box active, each remembered attack is stored as a straight logical sixteenth-note slot plus its source phase. Jev moves that slot pattern to the next safe matching phase and applies the current swing once at render time. This preserves the phrase's downbeat/offbeat structure instead of adding already-swung elapsed times to a new entrance and quantizing them again. When the session stops, the CLI prints separate Jev and Box/Keys CoreMIDI handoff-lateness summaries (`p50`, `p95`, and `p99`); these diagnose late packet delivery to CoreMIDI and are not audio-onset measurements from the synthesizer.
+
+## Use the denser house pulse
+
+`--groove house` keeps the ensemble moving instead of subtracting most of the backing when you play. It provides a kick on every quarter note, clap on beats 2 and 4, three hi-hat positions per beat, and one short modal synth stab on every offbeat. Jev enters only on the same shared quarter/eighth-note grid and expands a short recognized idea to at least six attacks; even its supporting hold becomes a repeated half-beat pulse. This mode is intentionally more persistent than `riot`, while `--groove off` and `--groove riot` retain their previous behavior.
+
+Start with a short drum kit on channel 10, a clipped chord or organ patch on channel 2, and a short bass/pluck on channel 3. Around 118–126 BPM and near-straight swing makes the timing easiest to hear:
+
+```bash
+swift run jev-bassist jam \
+  --source "Steinberg UR22mkII" \
+  --destination "Steinberg UR22mkII" \
+  --bpm 122 \
+  --input-channel 1 \
+  --texture-channel 2 \
+  --output-channel 3 \
+  --drum-channel 10 \
+  --style fugue \
+  --mode dorian \
+  --brain jev \
+  --intro-bars 2 \
+  --groove house \
+  --swing 0.54 \
+  --groove-intensity 0.82 \
+  --human-volume 100 \
+  --texture-volume 58 \
+  --companion-volume 78 \
+  --drum-volume 72 \
+  --ui
+```
+
+Click **Start** in the browser, then play against the kick rather than starting from a free-running phrase. The Swift session clock remains authoritative for Box, Keys, and Jev; the declared `--bpm` is fixed during a session, so playing at a different tempo will still sound displaced even though all generated parts share the same clock.
+
+If a synth ever keeps sounding after an interrupted session, send an explicit emergency stop:
+
+```bash
+swift run jev-bassist panic --destination "Steinberg UR22mkII"
+```
+
+This flushes future timestamped packets and sends All Notes Off plus All Sound Off on all 16 MIDI channels. A malformed `jam` command with a valid `--destination` now sends the same panic automatically before printing its error.
 
 ## Open the shared beat display
 

@@ -169,6 +169,42 @@ final class ConversationEngineTests: XCTestCase {
         )
     }
 
+    func testDeferredGrooveDecisionRebasesCanonicalRhythmWithoutDoubleSwing() throws {
+        let provider = DeferredConversationProvider()
+        var engine = ConversationEngine(
+            musicalStateConfiguration: try MusicalStateConfiguration(
+                tempoBPM: 120,
+                beatsPerBar: 4
+            ),
+            mode: .dorian,
+            outputChannel: 3,
+            grooveTiming: GrooveTiming(swing: 0.6, strength: 1),
+            decisionProvider: provider
+        )
+        let source = motif(
+            grooveStartSubdivision: 2,
+            grooveOnsets: [0, 0.5, 1],
+            groovePerformedOnsets: [0, 0.4, 1]
+        )
+
+        XCTAssertNil(engine.submit(source, availableAtMicroseconds: 2_215_000))
+        let inversionSummary = try XCTUnwrap(
+            provider.input(revision: 1)?.candidates.first { $0.id == "inversion" }
+        )
+        XCTAssertEqual(inversionSummary.relativeOnsets.count, 3)
+        XCTAssertEqual(inversionSummary.relativeOnsets[0], 0, accuracy: 0.0001)
+        XCTAssertEqual(inversionSummary.relativeOnsets[1], 0.4, accuracy: 0.0001)
+        XCTAssertEqual(inversionSummary.relativeOnsets[2], 1, accuracy: 0.0001)
+        provider.complete(revision: 1, candidateID: "inversion")
+        let plan = try XCTUnwrap(engine.advance(through: 2_350_000))
+        let onsets = plan.phrase.messages
+            .filter { $0.kind == .noteOn }
+            .map(\.offsetMicroseconds)
+
+        XCTAssertEqual(plan.phrase.startMicroseconds, 2_800_000)
+        XCTAssertEqual(onsets, [2_800_000, 3_000_000, 3_300_000])
+    }
+
     func testHumanAttackDoesNotErasePendingPhraseDecision() throws {
         let provider = DeferredConversationProvider()
         var engine = ConversationEngine(
@@ -270,7 +306,10 @@ final class ConversationEngineTests: XCTestCase {
         id: UInt64 = 1,
         pitches: [UInt8] = [62, 65, 67],
         durationBeats: Double = 2.12,
-        finalizedAt: UInt64 = 2_215_000
+        finalizedAt: UInt64 = 2_215_000,
+        grooveStartSubdivision: Int? = nil,
+        grooveOnsets: [Double?]? = nil,
+        groovePerformedOnsets: [Double]? = nil
     ) -> Motif {
         let onsetStep = durationBeats / Double(max(1, pitches.count))
         let preservedOnsets = [0.0, 0.6, 1.64]
@@ -280,9 +319,11 @@ final class ConversationEngineTests: XCTestCase {
                 sourceNoteID: UInt64(index + 1),
                 note: pitch,
                 velocity: index == 0 ? 96 : 82,
-                relativeOnsetBeats: pitches.count == 3
-                    ? preservedOnsets[index]
-                    : Double(index) * onsetStep,
+                relativeOnsetBeats: groovePerformedOnsets?[index]
+                    ?? (pitches.count == 3
+                        ? preservedOnsets[index]
+                        : Double(index) * onsetStep),
+                grooveOnsetBeats: grooveOnsets?[index],
                 durationBeats: pitches.count == 3
                     ? preservedDurations[index]
                     : max(0.12, onsetStep * 0.7),
@@ -306,7 +347,8 @@ final class ConversationEngineTests: XCTestCase {
                 restedNoteIndices: Array(notes.indices.dropFirst()),
                 characteristicIntervalIndices: []
             ),
-            finalizedAtMicroseconds: finalizedAt
+            finalizedAtMicroseconds: finalizedAt,
+            grooveStartSubdivision: grooveStartSubdivision
         )
     }
 }
@@ -352,5 +394,11 @@ private final class DeferredConversationProvider: ConversationDecisionProvider, 
             completed[revision] = candidateID
         }
         lock.unlock()
+    }
+
+    func input(revision: UInt64) -> ConversationSelectionInput? {
+        lock.lock()
+        defer { lock.unlock() }
+        return inputs[revision]
     }
 }
