@@ -23,6 +23,7 @@ The CLI completes its audible loop with either local rules or a pipelined Jev de
 - derive beat and bar snapshots containing note density, velocity, register, held notes, a pulse estimate, and ranked chord candidates;
 - make a bounded rule-based bass decision once per completed bar;
 - ask Jev for `activity`, `relationship`, `motion`, and `fill` in one typed request;
+- accept one-shot browser cues (`give space`, `lock in`, `push it`, or `surprise me`) for a future Jev decision;
 - prefetch Jev decisions one bar ahead and fall back to the deterministic rule policy without delaying a note;
 - log the complete secret-free Jev request, response, resolved model, outcome, and latency;
 - generate voice-led, dynamically restrained bass pockets and schedule them with CoreMIDI host timestamps;
@@ -142,6 +143,15 @@ The command starts a loopback-only server and opens `http://127.0.0.1:8765`. Cli
 
 Swift sends state changes with server-sent events. Between updates the page renders progress from Swift's original wall-clock start time, so animation jitter does not accumulate into musical clock drift. The TypeSafe API key remains in the Swift process and is never sent to the page.
 
+With `--brain jev`, the page also shows Jev's latest bounded decision and confidence. Four one-shot cues let the player answer Jev while playing:
+
+- **Give me space** asks for a restrained response;
+- **Lock in** asks Jev to support the current groove closely;
+- **Push it** asks for more momentum;
+- **Surprise me** asks for a safe contrasting response.
+
+The latest unsent cue replaces an earlier one. It is attached to the next safe prefetched decision and the page shows the target bar, so clicking never inserts a network wait into MIDI scheduling. If Jev is late or unavailable, the deterministic fallback honors the same cue.
+
 ## Switch the bassist brain to Jev
 
 Create an API key in the [TypeSafe dashboard](https://console.typesafe.ai/) and place it in the environment. Do not put the key in a command-line option, fixture, or log:
@@ -162,7 +172,7 @@ swift run jev-bassist jam \
   --brain jev
 ```
 
-The integration uses TypeSafe's documented `POST /v1/systemone` contract and `jev-latest` model alias. Four independent questions are evaluated together: three `choice` questions for activity, relationship, and motion, plus one `noul` question for fill. The request contains compact musical state, not raw MIDI bytes.
+The integration uses TypeSafe's documented `POST /v1/systemone` contract and `jev-latest` model alias. Four independent questions are evaluated together: three `choice` questions for activity, relationship, and motion, plus one `noul` question for fill. The request contains compact musical state and an optional one-shot player cue, not raw MIDI bytes.
 
 Jev work starts one full bar before the result can be used. At the next bar boundary the engine only reads an already completed result; it never waits. A missing, late, cancelled, malformed, HTTP-error, or low-confidence result uses the rule policy for that bar. With the default four-bar intro, the bar-5 decision is prefetched after bar 3, leaving bar 4 as the network budget.
 

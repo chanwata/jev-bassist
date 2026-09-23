@@ -46,6 +46,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
     public let chord: JevChordState?
     public let nextChord: JevChordState?
     public let isHeldChord: Bool
+    public let userCue: BassUserCue?
 
     public init(input: BassDecisionInput) {
         targetBarIndex = input.targetBarIndex
@@ -80,6 +81,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
             )
         }
         isHeldChord = input.isHeldChord
+        userCue = input.userCue
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -97,6 +99,7 @@ public struct JevBassState: Codable, Equatable, Sendable {
         case chord
         case nextChord = "next_chord"
         case isHeldChord = "is_held_chord"
+        case userCue = "user_cue"
     }
 }
 
@@ -147,7 +150,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
 
     public static let standard = JevBassQuestions(
         activity: JevChoiceQuestion(
-            instructions: "Choose the bass activity for the target bar. Leave room when the human is dense, and avoid activity when harmony is uncertain.",
+            instructions: "Choose the bass activity for the target bar. Treat user_cue as the player's one-shot musical request, while still leaving room when the human is dense and avoiding activity when harmony is uncertain.",
             criteria: [
                 "rest": "No bass attacks because usable harmony is absent or the safest musical response is silence.",
                 "sparse": "One or two widely spaced attacks that leave substantial room for the human player.",
@@ -156,7 +159,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             ]
         ),
         relationship: JevChoiceQuestion(
-            instructions: "Choose how the bass should relate to the human performance in the target bar.",
+            instructions: "Choose how the bass should relate to the human performance in the target bar. Honor user_cue when it is present: give_space asks for restraint, lock_in asks for close support, push asks for momentum, and surprise asks for a safe contrast.",
             criteria: [
                 "follow": "Use a connected groove that reinforces the player's current energy and harmonic direction.",
                 "contrast": "Use shorter, displaced attacks that create space instead of mirroring dense human activity.",
@@ -164,7 +167,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             ]
         ),
         motion: JevChoiceQuestion(
-            instructions: "Choose one bounded pitch-motion behavior for the bass phrase.",
+            instructions: "Choose one bounded pitch-motion behavior for the bass phrase, using user_cue as a preference rather than permission to leave the listed options.",
             criteria: [
                 "root": "Anchor the phrase primarily on the chord root.",
                 "step": "Move through nearby chord tones in a smooth supportive line.",
@@ -173,7 +176,7 @@ public struct JevBassQuestions: Codable, Equatable, Sendable {
             ]
         ),
         fill: JevNoulQuestion(
-            instructions: "Should the final bass attack approach the supplied following chord? Choose false when no following chord is supplied.",
+            instructions: "Should the final bass attack approach the supplied following chord? A push or surprise user_cue can favor a fill, but choose false when no following chord is supplied.",
             criteria: JevNoulCriteria(
                 trueDescription: "The target bar closes a phrase and the human leaves enough space for a small fill.",
                 falseDescription: "The player is dense, harmony is uncertain, or a plain ending would listen better."

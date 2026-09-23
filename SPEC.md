@@ -13,7 +13,7 @@ Can a low-latency typed decision model make an algorithmic accompanist feel more
 The intended first complete loop is:
 
 1. A player performs on a JD-Xi or another MIDI keyboard.
-2. The Mac derives a compact `MusicalState` from recent beats and bars.
+2. The Mac derives a compact `MusicalState` from recent beats and bars, optionally paired with a one-shot player cue from the browser companion.
 3. A `BassDecisionProvider` selects behavior at phrase-safe boundaries.
 4. A local phrase generator turns that behavior into concrete notes.
 5. A local scheduler sends the notes to a MIDI output without waiting for the network.
@@ -29,6 +29,8 @@ Jev is a decision maker, not a note generator. Its future typed output should re
 - `motion`: `root | step | approach | leap`
 - `fill`: Boolean
 - confidence or probability for each decision
+
+The optional player cue is also bounded: `give_space | lock_in | push | surprise`. It shapes one future prefetched decision and is then consumed. It is a musical preference, not a request for notes or timing.
 
 The exact schema will be fixed only after a rule-based bassist can already complete a live session.
 
@@ -60,6 +62,7 @@ Supporting paths record raw input, derived state, decisions, generated output, a
 - Rule and Jev modes can consume the same recorded performance.
 - A failure or timeout produces a local fallback decision and never hangs playback.
 - Browser rendering and transport controls remain outside the note scheduling path and never receive an API key.
+- Browser cues are consumed only at decision boundaries and never cause the scheduler to wait for Jev.
 
 ## MVP success criteria
 

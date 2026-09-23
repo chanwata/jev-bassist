@@ -45,6 +45,39 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(decision.confidence, 1)
     }
 
+    func testRulePolicyHonorsOneShotUserCuesAsDeterministicFallback() {
+        let provider = RuleBasedBassDecisionProvider()
+        let chord = ChordCandidate(rootPitchClass: 0, quality: .major, confidence: 1)
+        let nextChord = ChordCandidate(rootPitchClass: 7, quality: .major, confidence: 1)
+
+        let space = provider.decision(
+            for: BassDecisionInput(
+                state: state(noteCount: 2, density: 0.5),
+                chord: chord,
+                nextChord: nextChord,
+                isHeldChord: false,
+                targetBarIndex: 4,
+                userCue: .giveSpace
+            )
+        )
+        let push = provider.decision(
+            for: BassDecisionInput(
+                state: state(noteCount: 8, density: 2),
+                chord: chord,
+                nextChord: nextChord,
+                isHeldChord: false,
+                targetBarIndex: 4,
+                userCue: .push
+            )
+        )
+
+        XCTAssertEqual(space.activity, .sparse)
+        XCTAssertEqual(space.relationship, .contrast)
+        XCTAssertEqual(push.activity, .busy)
+        XCTAssertEqual(push.relationship, .follow)
+        XCTAssertTrue(push.fill)
+    }
+
     func testPhraseGeneratorProducesDeterministicPairedNotesInBassRange() throws {
         let generator = BassPhraseGenerator(outputChannel: 3)
         let decision = BassDecision(
@@ -265,6 +298,32 @@ final class LocalBassistTests: XCTestCase {
         XCTAssertEqual(plans[0].decision.activity, .busy)
     }
 
+    func testEngineCarriesQueuedUserCueThroughPrefetchAndPlan() throws {
+        let provider = ImmediatePreparedProvider()
+        var engine = LocalBassistEngine(
+            configuration: try LocalBassistConfiguration(
+                musicalState: MusicalStateConfiguration(
+                    tempoBPM: 120,
+                    beatsPerBar: 4
+                ),
+                introBars: 4,
+                outputChannel: 3
+            ),
+            decisionProvider: provider
+        )
+        engine.queueUserCue(.push)
+        var plans: [BassBarPlan] = []
+
+        for bar in 0..<4 {
+            let start = UInt64(bar) * 2_000_000
+            plans += try ingestTriad(at: start, into: &engine)
+            plans += try engine.advance(through: start + 2_000_000).plans
+        }
+
+        XCTAssertEqual(provider.preparedUserCues, [.push, nil])
+        XCTAssertEqual(plans.first?.userCue, .push)
+    }
+
     func testEngineUsesPlannedHarmonyAndApproachesTheNextChord() throws {
         let progression = try ChordProgressionParser.parse("Dm7,G7,Cmaj7,Cmaj7")
         var engine = LocalBassistEngine(
@@ -380,6 +439,7 @@ private final class ImmediatePreparedProvider: BassDecisionProvider, @unchecked 
     private let lock = NSLock()
     private var prepared: Set<Int> = []
     private var recordedPreparedTargets: [Int] = []
+    private var recordedPreparedUserCues: [BassUserCue?] = []
     private var recordedResolvedTargets: [Int] = []
 
     var preparedTargets: [Int] {
@@ -394,10 +454,17 @@ private final class ImmediatePreparedProvider: BassDecisionProvider, @unchecked 
         return recordedResolvedTargets
     }
 
+    var preparedUserCues: [BassUserCue?] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedPreparedUserCues
+    }
+
     func prepare(_ input: BassDecisionInput) {
         lock.lock()
         prepared.insert(input.targetBarIndex)
         recordedPreparedTargets.append(input.targetBarIndex)
+        recordedPreparedUserCues.append(input.userCue)
         lock.unlock()
     }
 

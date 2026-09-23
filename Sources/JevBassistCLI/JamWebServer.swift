@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import JevBassistCore
 import Network
 
 struct JamWebState: Codable, Sendable {
@@ -17,11 +18,16 @@ struct JamWebState: Codable, Sendable {
     let chord: String?
     let nextChord: String?
     let decisionSource: String?
+    let decision: BassDecision?
     let lastNote: String?
+    let appliedUserCue: BassUserCue?
+    let queuedUserCue: BassUserCue?
+    let queuedCueTargetBar: Int?
 }
 
 protocol JamWebControlling: AnyObject, Sendable {
     func startClockFromWeb()
+    func setUserCueFromWeb(_ cue: BassUserCue?)
 }
 
 /// A loopback-only HTTP/SSE bridge. It never handles MIDI inside a Network
@@ -146,9 +152,30 @@ final class JamWebServer: @unchecked Sendable {
             respond(status: "202 Accepted", body: Data("stopping".utf8), connection: connection) {
                 self.stopSignal()
             }
+        case ("POST", "/api/cue/give-space"):
+            handleCue(.giveSpace, request: request, connection: connection)
+        case ("POST", "/api/cue/lock-in"):
+            handleCue(.lockIn, request: request, connection: connection)
+        case ("POST", "/api/cue/push"):
+            handleCue(.push, request: request, connection: connection)
+        case ("POST", "/api/cue/surprise"):
+            handleCue(.surprise, request: request, connection: connection)
         default:
             respond(status: "404 Not Found", body: Data("not found".utf8), connection: connection)
         }
+    }
+
+    private func handleCue(
+        _ cue: BassUserCue?,
+        request: String,
+        connection: NWConnection
+    ) {
+        guard isTrustedBrowserRequest(request) else {
+            respond(status: "403 Forbidden", body: Data(), connection: connection)
+            return
+        }
+        controller?.setUserCueFromWeb(cue)
+        respond(status: "202 Accepted", body: Data("queued".utf8), connection: connection)
     }
 
     private func isTrustedBrowserRequest(_ request: String) -> Bool {

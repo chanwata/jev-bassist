@@ -20,6 +20,15 @@ public enum BassMotion: String, Codable, CaseIterable, Sendable {
     case leap
 }
 
+/// A one-shot musical cue from the player. The cue shapes one future bounded
+/// decision; it never bypasses the local phrase generator or scheduler.
+public enum BassUserCue: String, Codable, CaseIterable, Sendable {
+    case giveSpace = "give_space"
+    case lockIn = "lock_in"
+    case push
+    case surprise
+}
+
 /// A bounded musical decision. Concrete note choice and timing stay in the
 /// deterministic phrase generator.
 public struct BassDecision: Codable, Equatable, Sendable {
@@ -50,19 +59,22 @@ public struct BassDecisionInput: Codable, Equatable, Sendable {
     public let nextChord: ChordCandidate?
     public let isHeldChord: Bool
     public let targetBarIndex: Int
+    public let userCue: BassUserCue?
 
     public init(
         state: MusicalState,
         chord: ChordCandidate?,
         nextChord: ChordCandidate? = nil,
         isHeldChord: Bool,
-        targetBarIndex: Int
+        targetBarIndex: Int,
+        userCue: BassUserCue? = nil
     ) {
         self.state = state
         self.chord = chord
         self.nextChord = nextChord
         self.isHeldChord = isHeldChord
         self.targetBarIndex = targetBarIndex
+        self.userCue = userCue
     }
 }
 
@@ -123,6 +135,10 @@ public struct RuleBasedBassDecisionProvider: BassDecisionProvider {
             )
         }
 
+        if let cue = input.userCue {
+            return decision(for: cue, input: input)
+        }
+
         let density = input.state.noteDensityPerBeat
         if input.state.noteOnCount == 0 {
             return BassDecision(
@@ -158,6 +174,43 @@ public struct RuleBasedBassDecisionProvider: BassDecisionProvider {
             fill: false,
             confidence: 0.8
         )
+    }
+
+    private func decision(for cue: BassUserCue, input: BassDecisionInput) -> BassDecision {
+        switch cue {
+        case .giveSpace:
+            return BassDecision(
+                activity: .sparse,
+                relationship: .contrast,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            )
+        case .lockIn:
+            return BassDecision(
+                activity: .normal,
+                relationship: .follow,
+                motion: .root,
+                fill: false,
+                confidence: 1
+            )
+        case .push:
+            return BassDecision(
+                activity: .busy,
+                relationship: .follow,
+                motion: .step,
+                fill: input.nextChord != nil,
+                confidence: 1
+            )
+        case .surprise:
+            return BassDecision(
+                activity: input.state.noteDensityPerBeat >= 1.5 ? .sparse : .normal,
+                relationship: .contrast,
+                motion: .leap,
+                fill: input.nextChord != nil,
+                confidence: 1
+            )
+        }
     }
 }
 
@@ -526,6 +579,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
     public let targetBarIndex: Int
     public let chord: ChordCandidate?
     public let usedHeldChord: Bool
+    public let userCue: BassUserCue?
     public let decision: BassDecision
     public let decisionSource: BassDecisionSource
     public let phrase: BassPhrase
@@ -535,6 +589,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         targetBarIndex: Int,
         chord: ChordCandidate?,
         usedHeldChord: Bool,
+        userCue: BassUserCue? = nil,
         decision: BassDecision,
         decisionSource: BassDecisionSource = .rules,
         phrase: BassPhrase
@@ -543,6 +598,7 @@ public struct BassBarPlan: Codable, Equatable, Sendable {
         self.targetBarIndex = targetBarIndex
         self.chord = chord
         self.usedHeldChord = usedHeldChord
+        self.userCue = userCue
         self.decision = decision
         self.decisionSource = decisionSource
         self.phrase = phrase
@@ -616,6 +672,8 @@ public struct LocalBassistEngine: Sendable {
     private var lastChord: ChordCandidate?
     private var barsWithoutChord = 0
     private var previousBassNote: UInt8?
+    private var queuedUserCue: BassUserCue?
+    private var preparedUserCues: [Int: BassUserCue] = [:]
 
     public init(
         configuration: LocalBassistConfiguration,
@@ -643,6 +701,11 @@ public struct LocalBassistEngine: Sendable {
         decisionProvider.cancelPendingDecisions()
     }
 
+    /// Replaces any cue not yet sent. The most recent human instruction wins.
+    public mutating func queueUserCue(_ cue: BassUserCue?) {
+        queuedUserCue = cue
+    }
+
     private mutating func makeUpdate(
         from snapshots: [MusicalStateSnapshot]
     ) -> LocalBassistUpdate {
@@ -663,12 +726,14 @@ public struct LocalBassistEngine: Sendable {
             let resolvedChord = plannedChord ?? liveChord
             let usedHeldChord = plannedChord == nil && currentChord == nil && resolvedChord != nil
             if targetBarIndex >= configuration.introBars {
+                let userCue = preparedUserCues.removeValue(forKey: targetBarIndex)
                 let input = BassDecisionInput(
                     state: snapshot.state,
                     chord: resolvedChord,
                     nextChord: progressionChord(for: targetBarIndex + 1),
                     isHeldChord: usedHeldChord,
-                    targetBarIndex: targetBarIndex
+                    targetBarIndex: targetBarIndex,
+                    userCue: userCue
                 )
                 let resolution = decisionProvider.resolution(for: input)
                 let phrase = phraseGenerator.generate(
@@ -689,6 +754,7 @@ public struct LocalBassistEngine: Sendable {
                         targetBarIndex: targetBarIndex,
                         chord: resolvedChord,
                         usedHeldChord: usedHeldChord,
+                        userCue: userCue,
                         decision: resolution.decision,
                         decisionSource: resolution.source,
                         phrase: phrase
@@ -700,6 +766,11 @@ public struct LocalBassistEngine: Sendable {
             if preparedTargetBarIndex >= configuration.introBars {
                 let preparedPlannedChord = progressionChord(for: preparedTargetBarIndex)
                 let preparedChord = preparedPlannedChord ?? liveChord
+                let preparedUserCue = queuedUserCue
+                queuedUserCue = nil
+                if let preparedUserCue {
+                    preparedUserCues[preparedTargetBarIndex] = preparedUserCue
+                }
                 decisionProvider.prepare(
                     BassDecisionInput(
                         state: snapshot.state,
@@ -708,7 +779,8 @@ public struct LocalBassistEngine: Sendable {
                         isHeldChord: preparedPlannedChord == nil
                             && currentChord == nil
                             && preparedChord != nil,
-                        targetBarIndex: preparedTargetBarIndex
+                        targetBarIndex: preparedTargetBarIndex,
+                        userCue: preparedUserCue
                     )
                 )
             }
